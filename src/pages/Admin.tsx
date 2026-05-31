@@ -322,7 +322,7 @@ export default function Admin() {
 
           <form onSubmit={(e) => {
             e.preventDefault();
-            if (password === import.meta.env.VITE_ADMIN_PASSWORD) { setIsAuthenticated(true); setAuthError(false); }
+            if (password === "Swiftly@768") { setIsAuthenticated(true); setAuthError(false); }
             else { setAuthError(true); }
           }}>
             <input
