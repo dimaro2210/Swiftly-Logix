@@ -35,6 +35,12 @@ export default function Footer() {
                   </a>
                 ))}
               </div>
+              
+              <Link href="/admin">
+                <p className="mt-8 text-white/20 text-[10px] hover:text-[#F59A25] transition-colors cursor-pointer text-center md:text-left">
+                  System Admin
+                </p>
+              </Link>
             </div>
 
             {/* Column 2: Quick Links */}
