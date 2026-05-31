@@ -321,17 +321,11 @@ export default function Admin() {
           <h1 className="text-2xl font-bold text-[#0B2B26] mb-2">Admin Access Required</h1>
           <p className="text-[#235347] mb-8">Please enter the administrator password to continue.</p>
 
-          <form onSubmit={async (e) => {
+          <form onSubmit={(e) => {
             e.preventDefault();
             if (password === "Swiftly@768") { 
-              // Authenticate as the master admin in the background so Supabase RLS allows fetching data
-              const { error } = await supabase.auth.signInWithPassword({ email: 'admin@swiftlylogix.com', password: 'Swiftly@768' });
-              if (error) {
-                setAuthError(error.message);
-              } else {
-                setIsAuthenticated(true); 
-                setAuthError(false); 
-              }
+              setIsAuthenticated(true); 
+              setAuthError(false); 
             }
             else { setAuthError("Incorrect password."); }
           }}>
