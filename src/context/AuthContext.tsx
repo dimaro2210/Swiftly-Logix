@@ -136,7 +136,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         if (profile?.status === 'pending') {
           await supabase.auth.signOut();
-          return { success: false, error: "Your account information is under review, you will be notified as soon as possible." };
+          return { success: false, error: "Account is under review we will get back to you shortly." };
         }
         if (profile?.status === 'declined') {
           await supabase.auth.signOut();
