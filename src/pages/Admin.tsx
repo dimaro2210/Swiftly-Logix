@@ -7,6 +7,7 @@ import type { Bill, Deposit } from "@/lib/billingStore";
 import { generateTransitWaypoints } from "@/lib/waypointEngine";
 import { Link } from "wouter";
 import { Package, MapPin, User, Save, CheckCircle, RefreshCw, Copy, Pencil, Trash2, X, AlertCircle, List, ArrowLeft, Menu, ChevronRight, Eye, EyeOff, CreditCard, DollarSign, FileText, Check, XCircle, Plane, Plus, Loader2, Route, Navigation, Settings, Wallet } from "lucide-react";
+import { supabase } from "@/lib/supabase";
 
 const BLANK_FORM = {
   origin: "",
