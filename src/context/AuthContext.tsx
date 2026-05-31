@@ -1,10 +1,11 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from "react";
-import { supabase } from "@/lib/supabase";
+// Removed Supabase import
 
 interface User {
   firstName: string;
   lastName: string;
   email: string;
+  password?: string; // Stored locally for simple auth
   accountType: "Personal" | "Business";
   userId: string;
   company?: string;
@@ -46,104 +47,49 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const isAuthenticated = user !== null;
 
   useEffect(() => {
-    // Check active sessions and sets the user
-    const checkSession = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session?.user) {
-        await fetchProfile(session.user.id, session.user.email!);
-      } else {
+    // Check local session
+    const checkSession = () => {
+      try {
+        const sessionEmail = localStorage.getItem('swiftly_session');
+        if (sessionEmail) {
+          const usersRaw = localStorage.getItem('swiftly_users');
+          const users: User[] = usersRaw ? JSON.parse(usersRaw) : [];
+          const found = users.find(u => u.email === sessionEmail);
+          if (found) {
+            setUser(found);
+          } else {
+            localStorage.removeItem('swiftly_session');
+          }
+        }
+      } catch (err) {
+        console.error(err);
+      } finally {
         setLoading(false);
       }
     };
 
     checkSession();
-
-    // Listen for changes on auth state
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
-      if (session?.user) {
-        await fetchProfile(session.user.id, session.user.email!);
-      } else {
-        setUser(null);
-        setLoading(false);
-      }
-    });
-
-    return () => subscription.unsubscribe();
   }, []);
-
-  const fetchProfile = async (userId: string, email: string) => {
-    try {
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', userId)
-        .single();
-
-      if (error && error.code !== 'PGRST116') {
-        console.error("Error fetching profile:", error);
-      }
-
-      if (data) {
-        setUser({
-          firstName: data.first_name,
-          lastName: data.last_name,
-          email: data.email,
-          accountType: data.account_type,
-          userId: data.user_id,
-          company: data.company,
-          address: data.address,
-          postalCode: data.postal_code,
-          profilePicture: data.profile_picture,
-          status: data.status,
-          is_admin: data.is_admin,
-        });
-      } else {
-        // Fallback if profile doesn't exist yet (e.g. just signed up and trigger is delayed)
-        setUser({
-          firstName: "",
-          lastName: "",
-          email: email,
-          accountType: "Personal",
-          userId: email.split('@')[0],
-          status: "pending"
-        });
-      }
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const login = async (email: string, password: string): Promise<{ success: boolean; error?: string }> => {
     try {
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-      });
+      const usersRaw = localStorage.getItem('swiftly_users');
+      const users: User[] = usersRaw ? JSON.parse(usersRaw) : [];
+      const found = users.find(u => u.email.toLowerCase() === email.toLowerCase());
 
-      if (error) {
+      if (!found || found.password !== password) {
         return { success: false, error: "Invalid credentials. Please try again." };
       }
 
-      // Fetch profile to check status
-      if (data.user) {
-        const { data: profile } = await supabase
-          .from('profiles')
-          .select('status')
-          .eq('id', data.user.id)
-          .single();
-
-        if (profile?.status === 'pending') {
-          await supabase.auth.signOut();
-          return { success: false, error: "Account is under review we will get back to you shortly." };
-        }
-        if (profile?.status === 'declined') {
-          await supabase.auth.signOut();
-          return { success: false, error: "Your account has been declined. Please contact support." };
-        }
+      if (found.status === 'pending') {
+        return { success: false, error: "Account is under review we will get back to you shortly." };
+      }
+      if (found.status === 'declined') {
+        return { success: false, error: "Your account has been declined. Please contact support." };
       }
 
+      localStorage.setItem('swiftly_session', found.email);
+      setUser(found);
       return { success: true };
     } catch (err) {
       return { success: false, error: "An unexpected error occurred." };
@@ -152,32 +98,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const register = async (data: RegisterData): Promise<{ success: boolean; error?: string }> => {
     try {
-      const { error } = await supabase.auth.signUp({
-        email: data.email,
-        password: data.password,
-        options: {
-          data: {
-            first_name: data.firstName,
-            last_name: data.lastName,
-            account_type: data.accountType,
-            user_id: data.userId,
-            company: data.company,
-            address: data.address,
-            postal_code: data.postalCode,
-          }
-        }
-      });
-
-      if (error) {
-        if (error.message.includes('already registered')) {
-          return { success: false, error: "Email already exists." };
-        }
-        return { success: false, error: error.message };
+      const usersRaw = localStorage.getItem('swiftly_users');
+      const users: User[] = usersRaw ? JSON.parse(usersRaw) : [];
+      
+      const exists = users.find(u => u.email.toLowerCase() === data.email.toLowerCase());
+      if (exists) {
+        return { success: false, error: "Email already exists." };
       }
 
-      // We sign them out immediately since they are 'pending'
-      await supabase.auth.signOut();
+      const newUser: User = {
+        firstName: data.firstName,
+        lastName: data.lastName,
+        email: data.email,
+        password: data.password,
+        accountType: data.accountType,
+        userId: data.userId,
+        company: data.company,
+        address: data.address,
+        postalCode: data.postalCode,
+        status: "pending"
+      };
 
+      users.push(newUser);
+      localStorage.setItem('swiftly_users', JSON.stringify(users));
+
+      // We do not set session because they are pending
       return { success: true };
     } catch {
       return { success: false, error: "An error occurred. Please try again." };
@@ -185,7 +130,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const logout = async () => {
-    await supabase.auth.signOut();
+    localStorage.removeItem('swiftly_session');
     setUser(null);
   };
 
@@ -195,12 +140,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // Optimistic update
     setUser({ ...user, profilePicture: dataUri });
 
-    const { data: { session } } = await supabase.auth.getSession();
-    if (session?.user) {
-      await supabase
-        .from('profiles')
-        .update({ profile_picture: dataUri })
-        .eq('id', session.user.id);
+    try {
+      const usersRaw = localStorage.getItem('swiftly_users');
+      if (usersRaw) {
+        const users: User[] = JSON.parse(usersRaw);
+        const index = users.findIndex(u => u.email === user.email);
+        if (index >= 0) {
+          users[index].profilePicture = dataUri;
+          localStorage.setItem('swiftly_users', JSON.stringify(users));
+        }
+      }
+    } catch (err) {
+      console.error(err);
     }
   };
 

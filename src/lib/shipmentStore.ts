@@ -1,237 +1,65 @@
-import { supabase } from "./supabase";
+// Removed Supabase import
 
-export interface Shipment {
-  id: string;
-  trackingNumber: string;
-  tracking_code?: string;
-  status: string;
-  current_status?: string;
-  service: string;
-  from?: { name: string; address?: string; city: string; state: string; zip: string };
-  to?: { name: string; address?: string; city: string; state: string; zip: string };
-  weight: string;
-  createdAt: string;
-  estimatedDelivery?: string;
-  expected_delivery_date?: string;
-  events: Array<{ 
-    status: string; 
-    location: string; 
-    time: string; 
-    date: string;
-    coordinates?: { lat: number; lng: number };
-  }>;
-  
-  userEmail?: string;
-  origin?: string;
-  destination?: string;
-  carrier?: string;
-  shipment_type?: string;
-  sender_name?: string;
-  sender_email?: string;
-  sender_phone?: string;
-  sender_address?: string;
-  receiver_name?: string;
-  receiver_email?: string;
-  receiver_phone?: string;
-  receiver_address?: string;
-  contents?: string;
-  departure_date?: string;
-  departure_time?: string;
-  current_location?: string;
-  notice?: string;
-  transit_waypoints?: Array<{
-    name: string;
-    type: "origin" | "center" | "flight" | "destination";
-    lat: number;
-    lng: number;
-    order: number;
-  }>;
-  changeRequest?: {
-    id: string;
-    type: "reschedule" | "reroute" | "hold" | "neighbor";
-    status: "pending" | "approved" | "rejected";
-    newData: any;
-    createdAt: string;
-  };
-}
-
-export interface RegisteredUser {
-  id?: string; // supabase auth user id
-  firstName: string;
-  lastName: string;
-  email: string;
-  accountType: "Personal" | "Business";
-  userId: string;
-  company?: string;
-  address?: string;
-  postalCode?: string;
-  profilePicture?: string;
-  status?: "pending" | "approved" | "declined";
-  is_admin?: boolean;
-}
-
-export async function getShipments(): Promise<Shipment[]> {
+// Helper functions for localStorage
+const getLocalData = <T>(key: string): T[] => {
   try {
-    const { data, error } = await supabase
-      .from('shipments')
-      .select('*')
-      .order('created_at', { ascending: false });
-
-    if (error) throw error;
-    return (data || []).map(mapDbToShipment);
-  } catch (err) {
-    console.error("Error fetching shipments:", err);
+    const data = localStorage.getItem(key);
+    return data ? JSON.parse(data) : [];
+  } catch {
     return [];
   }
+};
+
+const setLocalData = <T>(key: string, data: T[]) => {
+  localStorage.setItem(key, JSON.stringify(data));
+};
+
+export async function getShipments(): Promise<Shipment[]> {
+  const shipments = getLocalData<Shipment>('swiftly_shipments');
+  return shipments.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 }
 
 export async function saveShipment(shipment: Shipment): Promise<void> {
-  try {
-    const dbPayload = {
-      id: shipment.id,
-      tracking_number: shipment.trackingNumber,
-      status: shipment.status,
-      current_status: shipment.current_status,
-      service: shipment.service,
-      weight: shipment.weight,
-      created_at: shipment.createdAt,
-      events: shipment.events,
-      origin: shipment.origin,
-      destination: shipment.destination,
-      carrier: shipment.carrier,
-      shipment_type: shipment.shipment_type,
-      sender_name: shipment.sender_name,
-      sender_email: shipment.sender_email,
-      sender_phone: shipment.sender_phone,
-      sender_address: shipment.sender_address,
-      receiver_name: shipment.receiver_name,
-      receiver_email: shipment.receiver_email,
-      receiver_phone: shipment.receiver_phone,
-      receiver_address: shipment.receiver_address,
-      contents: shipment.contents,
-      departure_date: shipment.departure_date,
-      departure_time: shipment.departure_time,
-      expected_delivery_date: shipment.expected_delivery_date,
-      estimated_delivery: shipment.estimatedDelivery,
-      current_location: shipment.current_location,
-      notice: shipment.notice,
-      user_email: shipment.userEmail,
-      transit_waypoints: shipment.transit_waypoints,
-      change_request: shipment.changeRequest,
-      from_data: shipment.from,
-      to_data: shipment.to,
-    };
-
-    await supabase.from('shipments').upsert(dbPayload);
-  } catch (err) {
-    console.error("Error saving shipment:", err);
+  const shipments = getLocalData<Shipment>('swiftly_shipments');
+  const index = shipments.findIndex(s => s.id === shipment.id);
+  if (index >= 0) {
+    shipments[index] = shipment;
+  } else {
+    shipments.push(shipment);
   }
+  setLocalData('swiftly_shipments', shipments);
 }
 
 export async function deleteShipment(id: string): Promise<void> {
-  try {
-    await supabase.from('shipments').delete().eq('id', id);
-  } catch (err) {
-    console.error("Error deleting shipment:", err);
-  }
+  let shipments = getLocalData<Shipment>('swiftly_shipments');
+  shipments = shipments.filter(s => s.id !== id);
+  setLocalData('swiftly_shipments', shipments);
 }
 
 export async function getShipmentsForUser(email: string): Promise<Shipment[]> {
-  try {
-    // A shipment belongs to a user if they are the sender (user_email) OR the receiver
-    const { data, error } = await supabase
-      .from('shipments')
-      .select('*')
-      .or(`user_email.ilike.${email},receiver_email.ilike.${email}`)
-      .order('created_at', { ascending: false });
-
-    if (error) throw error;
-    return (data || []).map(mapDbToShipment);
-  } catch (err) {
-    console.error("Error fetching user shipments:", err);
-    return [];
-  }
+  const shipments = getLocalData<Shipment>('swiftly_shipments');
+  return shipments
+    .filter(s => s.userEmail?.toLowerCase() === email.toLowerCase() || s.receiver_email?.toLowerCase() === email.toLowerCase())
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 }
 
 export async function getRegisteredUsers(): Promise<RegisteredUser[]> {
-  try {
-    const { data, error } = await supabase
-      .from('profiles')
-      .select('*')
-      .order('created_at', { ascending: false });
-
-    if (error) throw error;
-    
-    return data.map(d => ({
-      id: d.id,
-      firstName: d.first_name,
-      lastName: d.last_name,
-      email: d.email,
-      accountType: d.account_type,
-      userId: d.user_id,
-      company: d.company,
-      address: d.address,
-      postalCode: d.postal_code,
-      profilePicture: d.profile_picture,
-      status: d.status,
-      is_admin: d.is_admin,
-    }));
-  } catch (err) {
-    console.error("Error fetching users:", err);
-    return [];
-  }
+  const users = getLocalData<RegisteredUser>('swiftly_users');
+  return users; // Order not strictly needed for local storage as they are ordered by insertion
 }
 
 export async function updateRegisteredUser(user: RegisteredUser): Promise<void> {
-  try {
-    if (!user.email) return;
-    
-    const updatePayload: any = {
-      status: user.status
-    };
-
-    if (user.is_admin !== undefined) {
-      updatePayload.is_admin = user.is_admin;
-    }
-
-    await supabase
-      .from('profiles')
-      .update(updatePayload)
-      .eq('email', user.email);
-  } catch (err) {
-    console.error("Error updating user:", err);
+  const users = getLocalData<RegisteredUser>('swiftly_users');
+  const index = users.findIndex(u => u.email === user.email);
+  if (index >= 0) {
+    users[index] = { ...users[index], ...user };
+    setLocalData('swiftly_users', users);
   }
 }
 
 export async function getFullUserAccount(email: string): Promise<RegisteredUser | null> {
-  try {
-    const { data, error } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('email', email)
-      .single();
-
-    if (error) throw error;
-    if (!data) return null;
-
-    return {
-      id: data.id,
-      firstName: data.first_name,
-      lastName: data.last_name,
-      email: data.email,
-      accountType: data.account_type,
-      userId: data.user_id,
-      company: data.company,
-      address: data.address,
-      postalCode: data.postal_code,
-      profilePicture: data.profile_picture,
-      status: data.status,
-      is_admin: data.is_admin,
-    };
-  } catch (err) {
-    console.error("Error fetching full user:", err);
-    return null;
-  }
+  const users = getLocalData<RegisteredUser>('swiftly_users');
+  return users.find(u => u.email === email) || null;
 }
 
 export function generateTrackingNumber(): string {
@@ -241,45 +69,6 @@ export function generateTrackingNumber(): string {
     num += chars[Math.floor(Math.random() * chars.length)];
   }
   return `SWF${num}`;
-}
-
-// Mapper to map snake_case DB fields to our Shipment interface
-function mapDbToShipment(dbData: any): Shipment {
-  return {
-    id: dbData.id,
-    trackingNumber: dbData.tracking_number,
-    tracking_code: dbData.tracking_number,
-    status: dbData.status,
-    current_status: dbData.current_status || dbData.status,
-    service: dbData.service || "Standard",
-    weight: dbData.weight || "0",
-    createdAt: dbData.created_at,
-    events: dbData.events || [],
-    origin: dbData.origin,
-    destination: dbData.destination,
-    carrier: dbData.carrier,
-    shipment_type: dbData.shipment_type,
-    sender_name: dbData.sender_name,
-    sender_email: dbData.sender_email,
-    sender_phone: dbData.sender_phone,
-    sender_address: dbData.sender_address,
-    receiver_name: dbData.receiver_name,
-    receiver_email: dbData.receiver_email,
-    receiver_phone: dbData.receiver_phone,
-    receiver_address: dbData.receiver_address,
-    contents: dbData.contents,
-    departure_date: dbData.departure_date,
-    departure_time: dbData.departure_time,
-    expected_delivery_date: dbData.expected_delivery_date,
-    estimatedDelivery: dbData.estimated_delivery,
-    current_location: dbData.current_location,
-    notice: dbData.notice,
-    userEmail: dbData.user_email,
-    transit_waypoints: dbData.transit_waypoints,
-    changeRequest: dbData.change_request,
-    from: dbData.from_data,
-    to: dbData.to_data,
-  };
 }
 
 export const LOGISTICS_CENTERS = [

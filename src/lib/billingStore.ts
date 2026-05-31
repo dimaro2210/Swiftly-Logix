@@ -1,4 +1,4 @@
-import { supabase } from "./supabase";
+// Removed Supabase import
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -36,192 +36,117 @@ export interface Notification {
   createdAt: string;
 }
 
+// Helper functions for localStorage
+const getLocalData = <T>(key: string): T[] => {
+  try {
+    const data = localStorage.getItem(key);
+    return data ? JSON.parse(data) : [];
+  } catch {
+    return [];
+  }
+};
+
+const setLocalData = <T>(key: string, data: T[]) => {
+  localStorage.setItem(key, JSON.stringify(data));
+};
+
 // ── Bills ──────────────────────────────────────────────────────────
 
 export async function getBills(email?: string): Promise<Bill[]> {
-  try {
-    let query = supabase.from('bills').select('*').order('created_at', { ascending: false });
-    if (email) {
-      query = query.ilike('user_email', email);
-    }
-    const { data, error } = await query;
-    if (error) throw error;
-
-    return (data || []).map(mapDbToBill);
-  } catch (err) {
-    console.error("Error fetching bills:", err);
-    return [];
-  }
+  const bills = getLocalData<Bill>('swiftly_bills');
+  const filtered = email ? bills.filter(b => b.userEmail?.toLowerCase() === email.toLowerCase()) : bills;
+  return filtered.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 }
 
 export async function saveBill(bill: Bill): Promise<void> {
-  try {
-    const payload = {
-      id: bill.id,
-      user_email: bill.userEmail,
-      title: bill.title,
-      amount: bill.amount,
-      note: bill.note,
-      image_url: bill.imageUrl,
-      image_file_name: bill.imageFileName,
-      status: bill.status,
-      created_at: bill.createdAt,
-      paid_at: bill.paidAt,
-    };
-    await supabase.from('bills').upsert(payload);
-  } catch (err) {
-    console.error("Error saving bill:", err);
+  const bills = getLocalData<Bill>('swiftly_bills');
+  const index = bills.findIndex(b => b.id === bill.id);
+  if (index >= 0) {
+    bills[index] = bill;
+  } else {
+    bills.push(bill);
   }
+  setLocalData('swiftly_bills', bills);
 }
 
 export async function deleteBill(id: string): Promise<void> {
-  try {
-    await supabase.from('bills').delete().eq('id', id);
-  } catch (err) {
-    console.error("Error deleting bill:", err);
-  }
+  let bills = getLocalData<Bill>('swiftly_bills');
+  bills = bills.filter(b => b.id !== id);
+  setLocalData('swiftly_bills', bills);
 }
 
 // ── Deposits ───────────────────────────────────────────────────────
 
 export async function getDeposits(email?: string): Promise<Deposit[]> {
-  try {
-    let query = supabase.from('deposits').select('*').order('created_at', { ascending: false });
-    if (email) {
-      query = query.ilike('user_email', email);
-    }
-    const { data, error } = await query;
-    if (error) throw error;
-
-    return (data || []).map(mapDbToDeposit);
-  } catch (err) {
-    console.error("Error fetching deposits:", err);
-    return [];
-  }
+  const deposits = getLocalData<Deposit>('swiftly_deposits');
+  const filtered = email ? deposits.filter(d => d.userEmail?.toLowerCase() === email.toLowerCase()) : deposits;
+  return filtered.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 }
 
 export async function saveDeposit(deposit: Deposit): Promise<void> {
-  try {
-    const payload = {
-      id: deposit.id,
-      user_email: deposit.userEmail,
-      amount: deposit.amount,
-      method: deposit.method,
-      receipt_image: deposit.receiptImage,
-      status: deposit.status,
-      created_at: deposit.createdAt,
-      reviewed_at: deposit.reviewedAt,
-    };
-    await supabase.from('deposits').upsert(payload);
-  } catch (err) {
-    console.error("Error saving deposit:", err);
+  const deposits = getLocalData<Deposit>('swiftly_deposits');
+  const index = deposits.findIndex(d => d.id === deposit.id);
+  if (index >= 0) {
+    deposits[index] = deposit;
+  } else {
+    deposits.push(deposit);
   }
+  setLocalData('swiftly_deposits', deposits);
 }
 
 // ── Balance ────────────────────────────────────────────────────────
 
 export async function getUserBalance(email: string): Promise<number> {
   try {
-    const { data, error } = await supabase
-      .from('balances')
-      .select('balance')
-      .ilike('user_email', email)
-      .single();
-
-    if (error && error.code !== 'PGRST116') throw error;
-    return data ? Number(data.balance) : 0;
-  } catch (err) {
-    console.error("Error fetching balance:", err);
+    const data = localStorage.getItem(`swiftly_balance_${email.toLowerCase()}`);
+    return data ? Number(data) : 0;
+  } catch {
     return 0;
   }
 }
 
 export async function setUserBalance(email: string, amount: number): Promise<void> {
-  try {
-    await supabase.from('balances').upsert({
-      user_email: email,
-      balance: Math.max(0, amount)
-    });
-  } catch (err) {
-    console.error("Error setting balance:", err);
-  }
+  localStorage.setItem(`swiftly_balance_${email.toLowerCase()}`, String(Math.max(0, amount)));
 }
 
 // ── Notifications ──────────────────────────────────────────────────
 
 export async function getNotifications(email: string): Promise<Notification[]> {
-  try {
-    const { data, error } = await supabase
-      .from('notifications')
-      .select('*')
-      .ilike('user_email', email)
-      .order('created_at', { ascending: false });
-
-    if (error) throw error;
-    return (data || []).map(mapDbToNotif);
-  } catch (err) {
-    console.error("Error fetching notifications:", err);
-    return [];
-  }
+  const notifs = getLocalData<Notification>('swiftly_notifications');
+  return notifs
+    .filter(n => n.userEmail?.toLowerCase() === email.toLowerCase())
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 }
 
 export async function getAllNotifications(): Promise<Notification[]> {
-  try {
-    const { data, error } = await supabase
-      .from('notifications')
-      .select('*')
-      .order('created_at', { ascending: false });
-
-    if (error) throw error;
-    return (data || []).map(mapDbToNotif);
-  } catch (err) {
-    console.error("Error fetching all notifications:", err);
-    return [];
-  }
+  const notifs = getLocalData<Notification>('swiftly_notifications');
+  return notifs.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 }
 
 export async function saveNotification(notif: Notification): Promise<void> {
-  try {
-    const payload = {
-      id: notif.id,
-      user_email: notif.userEmail,
-      type: notif.type,
-      title: notif.title,
-      body: notif.body,
-      read: notif.read,
-      created_at: notif.createdAt,
-    };
-    await supabase.from('notifications').insert(payload);
-  } catch (err) {
-    console.error("Error saving notification:", err);
+  const notifs = getLocalData<Notification>('swiftly_notifications');
+  const index = notifs.findIndex(n => n.id === notif.id);
+  if (index >= 0) {
+    notifs[index] = notif;
+  } else {
+    notifs.push(notif);
   }
+  setLocalData('swiftly_notifications', notifs);
 }
 
 export async function markAllNotificationsRead(email: string): Promise<void> {
-  try {
-    await supabase
-      .from('notifications')
-      .update({ read: true })
-      .ilike('user_email', email);
-  } catch (err) {
-    console.error("Error marking notifications read:", err);
-  }
+  const notifs = getLocalData<Notification>('swiftly_notifications');
+  notifs.forEach(n => {
+    if (n.userEmail?.toLowerCase() === email.toLowerCase()) {
+      n.read = true;
+    }
+  });
+  setLocalData('swiftly_notifications', notifs);
 }
 
 export async function getUnreadCount(email: string): Promise<number> {
-  try {
-    const { count, error } = await supabase
-      .from('notifications')
-      .select('*', { count: 'exact', head: true })
-      .ilike('user_email', email)
-      .eq('read', false);
-
-    if (error) throw error;
-    return count || 0;
-  } catch (err) {
-    console.error("Error getting unread count:", err);
-    return 0;
-  }
+  const notifs = getLocalData<Notification>('swiftly_notifications');
+  return notifs.filter(n => n.userEmail?.toLowerCase() === email.toLowerCase() && !n.read).length;
 }
 
 // ── Wallet Addresses ───────────────────────────────────────────────
@@ -231,79 +156,24 @@ export async function getWalletAddresses(): Promise<{ bitcoin: string; usdt: str
     bitcoin: "bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh",
     usdt: "TQn9Y2khEsLJW1ChVWFMSMeRDow5KcbLSE"
   };
-
+  
   try {
-    const { data, error } = await supabase
-      .from('wallet_addresses')
-      .select('*')
-      .eq('id', 1)
-      .single();
-
-    if (error && error.code !== 'PGRST116') throw error;
+    const data = localStorage.getItem('swiftly_wallets');
     if (data) {
-      return { bitcoin: data.bitcoin, usdt: data.usdt };
+      return JSON.parse(data);
     }
     return defaults;
-  } catch (err) {
-    console.error("Error fetching wallet addresses:", err);
+  } catch {
     return defaults;
   }
 }
 
 export async function saveWalletAddresses(wallets: { bitcoin: string; usdt: string }): Promise<void> {
-  try {
-    await supabase.from('wallet_addresses').upsert({
-      id: 1,
-      bitcoin: wallets.bitcoin,
-      usdt: wallets.usdt
-    });
-  } catch (err) {
-    console.error("Error saving wallet addresses:", err);
-  }
+  localStorage.setItem('swiftly_wallets', JSON.stringify(wallets));
 }
 
 // ── Helpers ────────────────────────────────────────────────────────
 
 export function generateId(prefix = "id"): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-}
-
-function mapDbToBill(db: any): Bill {
-  return {
-    id: db.id,
-    userEmail: db.user_email,
-    title: db.title,
-    amount: Number(db.amount),
-    note: db.note,
-    imageUrl: db.image_url,
-    imageFileName: db.image_file_name,
-    status: db.status,
-    createdAt: db.created_at,
-    paidAt: db.paid_at,
-  };
-}
-
-function mapDbToDeposit(db: any): Deposit {
-  return {
-    id: db.id,
-    userEmail: db.user_email,
-    amount: Number(db.amount),
-    method: db.method,
-    receiptImage: db.receipt_image,
-    status: db.status,
-    createdAt: db.created_at,
-    reviewedAt: db.reviewed_at,
-  };
-}
-
-function mapDbToNotif(db: any): Notification {
-  return {
-    id: db.id,
-    userEmail: db.user_email,
-    type: db.type,
-    title: db.title,
-    body: db.body,
-    read: db.read,
-    createdAt: db.created_at,
-  };
 }
