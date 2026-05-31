@@ -77,7 +77,7 @@ function StatusBadge({ status }: { status: string }) {
 export default function Admin() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [password, setPassword] = useState("");
-  const [authError, setAuthError] = useState(false);
+  const [authError, setAuthError] = useState<string | false>(false);
 
   const [tab, setTab] = useState<"create" | "manage" | "users" | "billing" | "deposits" | "settings" | "requests">("create");
   const [formData, setFormData] = useState({ ...BLANK_FORM });
@@ -326,14 +326,13 @@ export default function Admin() {
               // Authenticate as the master admin in the background so Supabase RLS allows fetching data
               const { error } = await supabase.auth.signInWithPassword({ email: 'admin@swiftlylogix.com', password: 'Swiftly@768' });
               if (error) {
-                setAuthError(true);
-                alert("Admin account not found in Supabase! Please create admin@swiftlylogix.com with password Swiftly@768 in your Supabase Auth dashboard.");
+                setAuthError(error.message);
               } else {
                 setIsAuthenticated(true); 
                 setAuthError(false); 
               }
             }
-            else { setAuthError(true); }
+            else { setAuthError("Incorrect password."); }
           }}>
             <input
               type="password"
@@ -342,7 +341,7 @@ export default function Admin() {
               placeholder="Enter password..."
               className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-center text-[#0B2B26] focus:outline-none focus:border-[#F59A25] transition-colors mb-4"
             />
-            {authError && <p className="text-red-500 text-sm mb-4">Incorrect password.</p>}
+            {authError && <p className="text-red-500 text-sm mb-4">{authError}</p>}
             <button type="submit" className="w-full py-3 rounded-full bg-[#F59A25] text-white font-bold hover:bg-[#D38215] transition-colors">
               Access Dashboard
             </button>
