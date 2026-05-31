@@ -17,7 +17,7 @@ export default function Footer() {
             {/* Column 1: Brand */}
             <div className="space-y-6 sm:col-span-2 lg:col-span-1">
               <div className="flex items-center gap-3">
-                <img src="/swiftly_logo-removebg-preview.png" alt="Swiftly Logix" className="h-20 w-auto brightness-0 invert" />
+                <img src={`${import.meta.env.BASE_URL}swiftly_logo-removebg-preview.png`} alt="Swiftly Logix" className="h-20 w-auto brightness-0 invert" />
               </div>
               <p className="text-[#8EB69B] text-[14px] leading-relaxed max-w-xs">
                 Moving the world forward by delivering what matters. Your trusted partner for global logistics excellence.

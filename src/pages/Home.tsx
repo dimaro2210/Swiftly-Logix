@@ -70,7 +70,7 @@ export default function Home() {
               transform: "translate(-50%, -50%)"
             }}
           >
-            <source src="/hero_video.mp4" type="video/mp4" />
+            <source src={`${import.meta.env.BASE_URL}hero_video.mp4`} type="video/mp4" />
           </video>
           {/* Dark Overlay for Text Readability */}
           <div style={{

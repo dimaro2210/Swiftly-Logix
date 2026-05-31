@@ -84,7 +84,7 @@ export default function Signup() {
         <div className="absolute bottom-0 left-0 w-64 h-64 bg-[#235347] opacity-20 -ml-32 -mb-32 rounded-full blur-3xl"></div>
         <div className="relative z-10">
           <div className="mb-8 md:mb-12">
-            <img src="/swiftly_logo-removebg-preview.png" alt="SWIFTLY LOGIX" className="h-40 w-auto object-contain brightness-0 invert" />
+            <img src={`${import.meta.env.BASE_URL}swiftly_logo-removebg-preview.png`} alt="SWIFTLY LOGIX" className="h-40 w-auto object-contain brightness-0 invert" />
           </div>
           <h2 className="text-[24px] md:text-[40px] font-bold text-[#FFF7E1] mb-6 leading-tight">Start your journey with SWIFTLY LOGIX.</h2>
           <p className="text-[#8EB69B] text-[18px] mb-8 md:mb-12 leading-relaxed font-medium">Create an account to unlock powerful shipping tools, discounted rates, and seamless global logistics management.</p>
@@ -110,7 +110,7 @@ export default function Signup() {
           </button>
           <div className="bg-white rounded-[32px] p-6 md:p-12 border border-[#8EB69B]/30" style={{ boxShadow: "0px 10px 40px rgba(11,43,38,0.08)" }}>
             <div className="mb-10 flex flex-col items-center text-center">
-              <img src="/swiftly_logo-removebg-preview.png" alt="SWIFTLY LOGIX" className="h-24 md:h-32 w-auto mb-6 object-contain" style={{ filter: "brightness(0) saturate(100%) invert(14%) sepia(30%) saturate(700%) hue-rotate(120deg)" }} />
+              <img src={`${import.meta.env.BASE_URL}swiftly_logo-removebg-preview.png`} alt="SWIFTLY LOGIX" className="h-24 md:h-32 w-auto mb-6 object-contain" style={{ filter: "brightness(0) saturate(100%) invert(14%) sepia(30%) saturate(700%) hue-rotate(120deg)" }} />
               <h1 className="text-[24px] md:text-[32px] font-bold text-[#0B2B26] mb-3">Create Account</h1>
               <p className="text-[16px] text-[#235347] font-medium">
                 Already have an account? <Link href="/auth/login"><span className="font-bold cursor-pointer hover:underline" style={{ color: "#F59A25" }}>Sign In</span></Link>

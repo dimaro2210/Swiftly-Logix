@@ -316,7 +316,7 @@ export default function Admin() {
         <div className="absolute bottom-0 left-0 w-[800px] h-[800px] bg-[#8EB69B]/20 rounded-full blur-[150px] pointer-events-none mix-blend-multiply" />
 
         <div className="bg-white border border-gray-200 rounded-[32px] p-8 max-w-md w-full shadow-2xl relative z-10 text-center">
-          <img src="/swiftly_logo-removebg-preview.png" alt="Swiftly Logix" className="h-24 mx-auto mb-6" />
+          <img src={`${import.meta.env.BASE_URL}swiftly_logo-removebg-preview.png`} alt="Swiftly Logix" className="h-24 mx-auto mb-6" />
           <h1 className="text-2xl font-bold text-[#0B2B26] mb-2">Admin Access Required</h1>
           <p className="text-[#235347] mb-8">Please enter the administrator password to continue.</p>
 
@@ -355,7 +355,7 @@ export default function Admin() {
       <div className={`fixed inset-y-0 left-0 z-[100] w-64 md:w-72 border-r border-white/10 transform transition-transform duration-300 ease-in-out flex flex-col ${sidebarOpen ? "translate-x-0 shadow-2xl" : "-translate-x-full lg:translate-x-0 lg:static"} lg:shadow-none`} style={{ background: 'linear-gradient(180deg, #0B2B26 0%, #123d36 50%, #0B2B26 100%)' }}>
         <div className="h-16 md:h-20 flex items-center justify-between px-4 md:px-6 border-b border-white/10 shrink-0">
           <div className="flex items-center gap-2 md:gap-3 min-w-0">
-            <img src="/swiftly_logo-removebg-preview.png" alt="Swiftly Logix" className="h-10 md:h-12 shrink-0" />
+            <img src={`${import.meta.env.BASE_URL}swiftly_logo-removebg-preview.png`} alt="Swiftly Logix" className="h-10 md:h-12 shrink-0" />
             <span className="text-white font-bold text-[13px] md:text-[14px] tracking-wide truncate">Swiftly Logix Admin</span>
           </div>
           <button onClick={() => setSidebarOpen(false)} className="lg:hidden text-white/50 hover:text-white transition-colors shrink-0 ml-2">
@@ -437,7 +437,7 @@ export default function Admin() {
           <div className="px-3 md:px-8 h-full flex items-center justify-between">
             <Link href="/">
               <div className="flex items-center cursor-pointer group gap-2 md:gap-3">
-                <img src="/swiftly_logo-removebg-preview.png" alt="Swiftly Logix" className="h-12 md:h-20 transition-all duration-300 group-hover:scale-105" />
+                <img src={`${import.meta.env.BASE_URL}swiftly_logo-removebg-preview.png`} alt="Swiftly Logix" className="h-12 md:h-20 transition-all duration-300 group-hover:scale-105" />
                 <span className="font-bold tracking-widest text-[12px] md:text-[18px] text-[#0B2B26]">
                   Swiftly Logix Admin
                 </span>

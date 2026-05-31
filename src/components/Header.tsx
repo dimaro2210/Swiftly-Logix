@@ -112,7 +112,7 @@ export default function Header() {
           <div className="flex items-center gap-6 md:gap-12">
              <Link href="/">
                 <div className="flex items-center cursor-pointer group">
-                   <img src="/swiftly_logo-removebg-preview.png" alt="SWIFTLY LOGIX" className={`transition-all duration-300 ${scrolled ? "h-20" : "h-28"} group-hover:scale-105`} />
+                   <img src={`${import.meta.env.BASE_URL}swiftly_logo-removebg-preview.png`} alt="SWIFTLY LOGIX" className={`transition-all duration-300 ${scrolled ? "h-20" : "h-28"} group-hover:scale-105`} />
                 </div>
              </Link>
 
@@ -288,7 +288,7 @@ export default function Header() {
               {/* Mobile Menu Content */}
               <div className="relative z-[10] flex flex-col h-full p-8">
               <div className="flex items-center justify-between mb-8 md:mb-12">
-                 <img src="/swiftly_logo-removebg-preview.png" alt="Logo" className="h-20" />
+                 <img src={`${import.meta.env.BASE_URL}swiftly_logo-removebg-preview.png`} alt="Logo" className="h-20" />
                  <button onClick={() => setMobileOpen(false)}
                    className="w-10 h-10 rounded-full flex items-center justify-center"
                    style={{

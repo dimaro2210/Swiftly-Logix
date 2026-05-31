@@ -476,7 +476,7 @@ export default function Billing() {
             <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 shrink-0">
               <div className="flex items-center gap-3 min-w-0">
                 <div className="w-9 h-9 rounded-lg bg-[#0B2B26] flex items-center justify-center shrink-0">
-                  <img src="/swiftly_logo-removebg-preview.png" alt="S" className="h-4 w-auto brightness-0 invert" />
+                  <img src={`${import.meta.env.BASE_URL}swiftly_logo-removebg-preview.png`} alt="S" className="h-4 w-auto brightness-0 invert" />
                 </div>
                 <div className="min-w-0">
                   <p className="font-outfit font-bold text-[#0B2B26] text-[15px] truncate">{selectedBill.title || "Invoice"}</p>
@@ -534,7 +534,7 @@ export default function Billing() {
               <div className="pt-4 border-t border-gray-100">
                 <div className="flex items-center gap-3">
                   <div className="w-8 h-8 rounded-lg bg-[#0B2B26] flex items-center justify-center shrink-0">
-                    <img src="/swiftly_logo-removebg-preview.png" alt="S" className="h-4 w-auto brightness-0 invert" />
+                    <img src={`${import.meta.env.BASE_URL}swiftly_logo-removebg-preview.png`} alt="S" className="h-4 w-auto brightness-0 invert" />
                   </div>
                   <div className="w-[2px] h-6 rounded-full bg-[#F59A25]" />
                   <div className="min-w-0">

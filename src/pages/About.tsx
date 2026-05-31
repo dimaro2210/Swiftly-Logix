@@ -26,7 +26,7 @@ export default function About() {
           transition={{ duration: 1.5, ease: "easeOut" }}
           className="absolute inset-0 z-0"
         >
-          <img src="/swiftly_delivery_van.png"
+          <img src={`${import.meta.env.BASE_URL}swiftly_delivery_van.png`}
             alt="Swiftly Logix Truck" className="w-full h-full object-cover" />
           <div className="absolute inset-0 bg-[#0B2B26]/70 mix-blend-multiply" />
           <div className="absolute inset-0 bg-gradient-to-t from-[#0B2B26] via-transparent to-transparent" />
