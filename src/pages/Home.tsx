@@ -81,12 +81,17 @@ export default function Home() {
         </div>
 
         <div className="max-w-7xl mx-auto px-4 md:px-6 relative w-full pt-20 pb-40" data-aos="fade-up" style={{ zIndex: 1 }}>
-          <h1 className="text-[36px] md:text-[56px] font-bold text-[#FFF7E1] mb-6 leading-tight max-w-3xl">
-            Fast, Reliable Delivery Worldwide
-          </h1>
-          <p className="text-[16px] md:text-[20px] text-[#DAF1DE] max-w-2xl leading-relaxed">
-            Your logistics partner for the modern world. Ship, track, and manage your deliveries seamlessly with SWIFTLY LOGIX.
-          </p>
+          <div className="text-center md:text-left mt-8 md:mt-12 flex-1 md:pr-12 lg:pr-24" data-aos="fade-right">
+            <h1 className="text-[32px] sm:text-[40px] md:text-[56px] lg:text-[72px] font-outfit font-black text-white leading-[1.05] mb-6">
+              Global Delivery, <br className="hidden md:block" />
+              <span className="text-transparent bg-clip-text bg-gradient-to-r from-[#F59A25] to-[#fbc576]">
+                Simplified.
+              </span>
+            </h1>
+            <p className="text-[15px] sm:text-[18px] md:text-[22px] text-white/90 mb-8 md:mb-10 max-w-2xl mx-auto md:mx-0 font-medium">
+              Experience fast, reliable, and completely transparent shipping from origin to destination.
+            </p>
+          </div>
         </div>
       </div>
 

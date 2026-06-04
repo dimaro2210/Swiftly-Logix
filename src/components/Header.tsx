@@ -59,7 +59,7 @@ export default function Header() {
     <>
       {/* Main Navigation — Liquid Glass Header */}
       <header
-        className={`sticky top-0 z-[100] transition-all duration-500 ${scrolled ? "h-20" : "h-24"}`}
+        className="sticky top-0 z-[100] h-20"
         style={{
           background: 'transparent',
         }}
@@ -76,8 +76,8 @@ export default function Header() {
         />
         {/* Layer 2: Base Overlay */}
         <div
-          className="absolute inset-0 z-[1] transition-all duration-500"
-          style={{ background: scrolled ? 'rgba(255,255,255,0.6)' : 'rgba(255,255,255,0.2)' }}
+          className="absolute inset-0 z-[1]"
+          style={{ background: 'rgba(255,255,255,0.4)' }}
         />
         {/* Layer 3: Frosted Tint */}
         <div
@@ -86,12 +86,10 @@ export default function Header() {
         />
         {/* Layer 4: Inner glow / shadow */}
         <div
-          className="absolute inset-0 z-[3] overflow-hidden transition-all duration-500"
+          className="absolute inset-0 z-[3] overflow-hidden"
           style={{
-            boxShadow: scrolled
-              ? 'inset 0 1px 1px 0 rgba(255,255,255,0.8), inset 0 -1px 1px 0 rgba(255,255,255,0.3), 0 8px 32px rgba(0,0,0,0.05)'
-              : 'inset 0 1px 1px 0 rgba(255,255,255,0.8), inset 0 -1px 1px 0 rgba(255,255,255,0.3)',
-            borderBottom: scrolled ? '1px solid rgba(255,255,255,0.6)' : '1px solid rgba(255,255,255,0.2)'
+            boxShadow: 'inset 0 1px 1px 0 rgba(255,255,255,0.8), inset 0 -1px 1px 0 rgba(255,255,255,0.3), 0 8px 32px rgba(0,0,0,0.05)',
+            borderBottom: '1px solid rgba(255,255,255,0.4)'
           }}
         />
 
@@ -100,7 +98,7 @@ export default function Header() {
           <div className="flex items-center gap-6 md:gap-12">
              <Link href="/">
                 <div className="flex items-center cursor-pointer group">
-                   <img src={`${import.meta.env.BASE_URL}swiftly_logo-removebg-preview.png`} alt="SWIFTLY LOGIX" className={`transition-all duration-300 ${scrolled ? "h-20" : "h-28"} group-hover:scale-105`} />
+                   <img src={`${import.meta.env.BASE_URL}swiftly_logo-removebg-preview.png`} alt="SWIFTLY LOGIX" className="transition-all duration-300 h-20 group-hover:scale-105" />
                 </div>
              </Link>
 
