@@ -5,7 +5,7 @@ import { ChevronDown, User, LogOut, Menu, X } from "lucide-react";
 
 export default function Header() {
   const { user, logout, isAuthenticated } = useAuth();
-  const [location] = useLocation();
+  const [location, setLocation] = useLocation();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [activeDropdown, setActiveDropdown] = useState<string | null>(null);
   const [scrolled, setScrolled] = useState(false);
