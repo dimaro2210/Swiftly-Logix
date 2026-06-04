@@ -1,16 +1,17 @@
-// Removed Supabase import
+import { supabase } from '@/lib/supabase';
 
 // ── Types ──────────────────────────────────────────────────────────
 
 export interface Bill {
   id: string;
   userEmail: string;
+  receiverEmail?: string;
   title: string;
   amount: number;
   note: string;
   imageUrl?: string;
   imageFileName?: string;
-  status: "unpaid" | "paid";
+  status: "unpaid" | "pending" | "paid";
   createdAt: string;
   paidAt?: string;
 }
@@ -36,144 +37,197 @@ export interface Notification {
   createdAt: string;
 }
 
-// Helper functions for localStorage
-const getLocalData = <T>(key: string): T[] => {
-  try {
-    const data = localStorage.getItem(key);
-    return data ? JSON.parse(data) : [];
-  } catch {
-    return [];
-  }
-};
-
-const setLocalData = <T>(key: string, data: T[]) => {
-  localStorage.setItem(key, JSON.stringify(data));
-};
-
 // ── Bills ──────────────────────────────────────────────────────────
 
-export async function getBills(email?: string): Promise<Bill[]> {
-  const bills = getLocalData<Bill>('swiftly_bills');
-  const filtered = email ? bills.filter(b => b.userEmail?.toLowerCase() === email.toLowerCase()) : bills;
-  return filtered.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-}
-
-export async function saveBill(bill: Bill): Promise<void> {
-  const bills = getLocalData<Bill>('swiftly_bills');
-  const index = bills.findIndex(b => b.id === bill.id);
-  if (index >= 0) {
-    bills[index] = bill;
-  } else {
-    bills.push(bill);
+export async function getBills(email?: string, client = supabase): Promise<Bill[]> {
+  let query = client.from('bills').select('*').order('created_at', { ascending: false });
+  if (email) {
+    query = query.eq('user_email', email);
   }
-  setLocalData('swiftly_bills', bills);
+  const { data, error } = await query;
+  if (error) {
+    console.error(error);
+    return [];
+  }
+  return (data || []).map(mapDbToBill);
 }
 
-export async function deleteBill(id: string): Promise<void> {
-  let bills = getLocalData<Bill>('swiftly_bills');
-  bills = bills.filter(b => b.id !== id);
-  setLocalData('swiftly_bills', bills);
+export async function saveBill(bill: Bill, client = supabase): Promise<void> {
+  const { error } = await client.from('bills').upsert(mapBillToDb(bill));
+  if (error) console.error(error);
+}
+
+export async function deleteBill(id: string, client = supabase): Promise<void> {
+  const { error } = await client.from('bills').delete().eq('id', id);
+  if (error) console.error(error);
 }
 
 // ── Deposits ───────────────────────────────────────────────────────
 
-export async function getDeposits(email?: string): Promise<Deposit[]> {
-  const deposits = getLocalData<Deposit>('swiftly_deposits');
-  const filtered = email ? deposits.filter(d => d.userEmail?.toLowerCase() === email.toLowerCase()) : deposits;
-  return filtered.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+export async function getDeposits(email?: string, client = supabase): Promise<Deposit[]> {
+  let query = client.from('deposits').select('*').order('created_at', { ascending: false });
+  if (email) {
+    query = query.eq('user_email', email);
+  }
+  const { data, error } = await query;
+  if (error) {
+    console.error(error);
+    return [];
+  }
+  return (data || []).map(mapDbToDeposit);
 }
 
-export async function saveDeposit(deposit: Deposit): Promise<void> {
-  const deposits = getLocalData<Deposit>('swiftly_deposits');
-  const index = deposits.findIndex(d => d.id === deposit.id);
-  if (index >= 0) {
-    deposits[index] = deposit;
-  } else {
-    deposits.push(deposit);
-  }
-  setLocalData('swiftly_deposits', deposits);
+export async function saveDeposit(deposit: Deposit, client = supabase): Promise<void> {
+  const { error } = await client.from('deposits').upsert(mapDepositToDb(deposit));
+  if (error) console.error(error);
 }
 
 // ── Balance ────────────────────────────────────────────────────────
 
-export async function getUserBalance(email: string): Promise<number> {
-  try {
-    const data = localStorage.getItem(`swiftly_balance_${email.toLowerCase()}`);
-    return data ? Number(data) : 0;
-  } catch {
-    return 0;
-  }
+export async function getUserBalance(email: string, client = supabase): Promise<number> {
+  const { data, error } = await client.from('users').select('wallet_balance').eq('email', email).single();
+  if (error || !data) return 0;
+  return Number(data.wallet_balance) || 0;
 }
 
-export async function setUserBalance(email: string, amount: number): Promise<void> {
-  localStorage.setItem(`swiftly_balance_${email.toLowerCase()}`, String(Math.max(0, amount)));
+export async function setUserBalance(email: string, amount: number, client = supabase): Promise<void> {
+  const { error } = await client.from('users').update({ wallet_balance: Math.max(0, amount) }).eq('email', email);
+  if (error) console.error(error);
 }
 
 // ── Notifications ──────────────────────────────────────────────────
 
-export async function getNotifications(email: string): Promise<Notification[]> {
-  const notifs = getLocalData<Notification>('swiftly_notifications');
-  return notifs
-    .filter(n => n.userEmail?.toLowerCase() === email.toLowerCase())
-    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+export async function getNotifications(email: string, client = supabase): Promise<Notification[]> {
+  const { data, error } = await client.from('notifications').select('*').eq('user_email', email).order('created_at', { ascending: false });
+  if (error) return [];
+  return (data || []).map(mapDbToNotification);
 }
 
-export async function getAllNotifications(): Promise<Notification[]> {
-  const notifs = getLocalData<Notification>('swiftly_notifications');
-  return notifs.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+export async function getAllNotifications(client = supabase): Promise<Notification[]> {
+  const { data, error } = await client.from('notifications').select('*').order('created_at', { ascending: false });
+  if (error) return [];
+  return (data || []).map(mapDbToNotification);
 }
 
-export async function saveNotification(notif: Notification): Promise<void> {
-  const notifs = getLocalData<Notification>('swiftly_notifications');
-  const index = notifs.findIndex(n => n.id === notif.id);
-  if (index >= 0) {
-    notifs[index] = notif;
-  } else {
-    notifs.push(notif);
-  }
-  setLocalData('swiftly_notifications', notifs);
+export async function saveNotification(notif: Notification, client = supabase): Promise<void> {
+  const { error } = await client.from('notifications').upsert(mapNotificationToDb(notif));
+  if (error) console.error(error);
 }
 
-export async function markAllNotificationsRead(email: string): Promise<void> {
-  const notifs = getLocalData<Notification>('swiftly_notifications');
-  notifs.forEach(n => {
-    if (n.userEmail?.toLowerCase() === email.toLowerCase()) {
-      n.read = true;
-    }
-  });
-  setLocalData('swiftly_notifications', notifs);
+export async function markAllNotificationsRead(email: string, client = supabase): Promise<void> {
+  const { error } = await client.from('notifications').update({ read: true }).eq('user_email', email);
+  if (error) console.error(error);
 }
 
-export async function getUnreadCount(email: string): Promise<number> {
-  const notifs = getLocalData<Notification>('swiftly_notifications');
-  return notifs.filter(n => n.userEmail?.toLowerCase() === email.toLowerCase() && !n.read).length;
+export async function getUnreadCount(email: string, client = supabase): Promise<number> {
+  const { count, error } = await client.from('notifications').select('*', { count: 'exact', head: true }).eq('user_email', email).eq('read', false);
+  if (error) return 0;
+  return count || 0;
 }
 
 // ── Wallet Addresses ───────────────────────────────────────────────
 
-export async function getWalletAddresses(): Promise<{ bitcoin: string; usdt: string }> {
+export async function getWalletAddresses(client = supabase): Promise<{ bitcoin: string; usdt: string }> {
   const defaults = {
     bitcoin: "bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh",
     usdt: "TQn9Y2khEsLJW1ChVWFMSMeRDow5KcbLSE"
   };
-  
-  try {
-    const data = localStorage.getItem('swiftly_wallets');
-    if (data) {
-      return JSON.parse(data);
-    }
-    return defaults;
-  } catch {
-    return defaults;
-  }
+  const { data, error } = await client.from('settings').select('*').eq('key', 'crypto_wallets').maybeSingle();
+  if (error || !data) return defaults;
+  return data.value;
 }
 
-export async function saveWalletAddresses(wallets: { bitcoin: string; usdt: string }): Promise<void> {
-  localStorage.setItem('swiftly_wallets', JSON.stringify(wallets));
+export async function saveWalletAddresses(wallets: { bitcoin: string; usdt: string }, client = supabase): Promise<void> {
+  const { error } = await client.from('settings').upsert({ key: 'crypto_wallets', value: wallets });
+  if (error) console.error(error);
 }
 
 // ── Helpers ────────────────────────────────────────────────────────
 
 export function generateId(prefix = "id"): string {
-  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  // Supabase tables (bills, deposits, notifications, shipments) use UUID primary keys.
+  // We must return a valid UUID instead of a timestamp-based string.
+  return crypto.randomUUID();
+}
+
+function mapDbToBill(db: any): Bill {
+  return {
+    id: db.id,
+    userEmail: db.user_email,
+    receiverEmail: db.receiver_email,
+    title: db.title,
+    amount: Number(db.amount),
+    note: db.note,
+    imageUrl: db.image_url,
+    imageFileName: db.image_file_name,
+    status: db.status,
+    createdAt: db.created_at,
+    paidAt: db.paid_at,
+  };
+}
+
+function mapBillToDb(b: Bill): any {
+  return {
+    id: b.id,
+    user_email: b.userEmail,
+    receiver_email: b.receiverEmail,
+    title: b.title,
+    amount: b.amount,
+    note: b.note,
+    image_url: b.imageUrl,
+    image_file_name: b.imageFileName,
+    status: b.status,
+    created_at: b.createdAt,
+    paid_at: b.paidAt,
+  };
+}
+
+function mapDbToDeposit(db: any): Deposit {
+  return {
+    id: db.id,
+    userEmail: db.user_email,
+    amount: Number(db.amount),
+    method: db.method,
+    receiptImage: db.receipt_image,
+    status: db.status,
+    createdAt: db.created_at,
+    reviewedAt: db.reviewed_at,
+  };
+}
+
+function mapDepositToDb(d: Deposit): any {
+  return {
+    id: d.id,
+    user_email: d.userEmail,
+    amount: d.amount,
+    method: d.method,
+    receipt_image: d.receiptImage,
+    status: d.status,
+    created_at: d.createdAt,
+    reviewed_at: d.reviewedAt,
+  };
+}
+
+function mapDbToNotification(db: any): Notification {
+  return {
+    id: db.id,
+    userEmail: db.user_email,
+    type: db.type,
+    title: db.title,
+    body: db.body,
+    read: db.read,
+    createdAt: db.created_at,
+  };
+}
+
+function mapNotificationToDb(n: Notification): any {
+  return {
+    id: n.id,
+    user_email: n.userEmail,
+    type: n.type,
+    title: n.title,
+    body: n.body,
+    read: n.read,
+    created_at: n.createdAt,
+  };
 }

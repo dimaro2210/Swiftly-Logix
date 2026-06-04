@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useLocation, Link } from "wouter";
-import { ChevronRight, Bell, Truck, HelpCircle, ArrowLeft, ArrowRight, Play, Globe, Shield, Zap, Clock } from "lucide-react";
+import { ChevronRight, Bell, Truck, HelpCircle, ArrowLeft, ArrowRight, Play, Globe, Shield, Zap, Clock, Package, CreditCard, TrendingUp } from "lucide-react";
 
 export default function Home() {
   const [trackingNumber, setTrackingNumber] = useState("");
@@ -108,9 +108,9 @@ export default function Home() {
               <div className="relative z-[10]">
               {/* Tracking heading with icon */}
               <div className="flex items-center gap-4 mb-6">
-                <img src="https://www.ups.com/us/en/media_1821b85213357cf79b6cf93c9b6f3c651898bb26c.avif?width=200&format=webply&optimize=medium"
-                  alt="Track icon"
-                  className="w-14 h-14 object-contain" />
+                <div className="w-14 h-14 bg-[#DAF1DE] rounded-full flex items-center justify-center">
+                  <Package size={28} className="text-[#235347]" />
+                </div>
                 <h2 className="text-[20px] sm:text-[24px] md:text-[36px] font-medium text-[#0B2B26]">Tracking</h2>
               </div>
 
@@ -346,14 +346,14 @@ export default function Home() {
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 md:gap-8">
             {[
-              { title: "Quicker Checkout", desc: "Give us your information once and we'll save it for next time.", icon: "https://assets.ups.com/adobe/assets/urn:aaid:aem:a14d81a8-9159-42ac-b872-7ce7cedafa6b/as/ups-payment-options-cc.avif?assetname=ups-payment-options-cc.png" },
-              { title: "Personalized Discounts", desc: "Answer a few quick questions and we'll find the best deal for your business.", icon: "https://assets.ups.com/adobe/assets/urn:aaid:aem:d13bdad0-14dd-41c7-838e-a037306fc4c2/as/discountShoppingBag_v2.avif?assetname=discountShoppingBag_v2.png" },
-              { title: "Custom Alerts", desc: "Get the shipping notifications you want — and only the ones you want.", icon: "https://assets.ups.com/adobe/assets/urn:aaid:aem:845c4ceb-609f-4647-b3b7-394c9d9c0552/as/ups-warning.avif?assetname=ups-warning.png" },
-              { title: "On-Demand Pickups", desc: "We'll take your shipments on your schedule — every day or every now and then.", icon: "https://assets.ups.com/adobe/assets/urn:aaid:aem:89d193b3-fb0d-4290-9edc-f53bc262875e/as/ups-pickups-dropoffs-dolly-boxes.avif?assetname=ups-pickups-dropoffs-dolly-boxes.png" },
+              { title: "Quicker Checkout", desc: "Give us your information once and we'll save it for next time.", icon: CreditCard },
+              { title: "Personalized Discounts", desc: "Answer a few quick questions and we'll find the best deal for your business.", icon: TrendingUp },
+              { title: "Custom Alerts", desc: "Get the shipping notifications you want — and only the ones you want.", icon: Bell },
+              { title: "On-Demand Pickups", desc: "We'll take your shipments on your schedule — every day or every now and then.", icon: Truck },
             ].map((item, i) => (
               <div key={item.title} className="bg-white rounded-[32px] p-8 md:p-10 shadow-[0_8px_30px_rgb(0,0,0,0.04)] hover:shadow-[0_20px_40px_rgb(0,0,0,0.08)] transition-all duration-300 hover:-translate-y-2 border border-[#8EB69B]/20 group flex flex-col h-full cursor-pointer">
                 <div className="w-20 h-20 rounded-[20px] bg-[#DAF1DE]/50 flex items-center justify-center mb-8 group-hover:bg-[#DAF1DE] transition-colors duration-300">
-                  <img src={item.icon} alt={item.title} className="w-12 h-12 object-contain transform group-hover:scale-110 transition-transform duration-500" style={{ filter: "drop-shadow(0px 4px 6px rgba(0,0,0,0.1))" }} />
+                  <item.icon size={36} className="text-[#235347] transform group-hover:scale-110 transition-transform duration-500" style={{ filter: "drop-shadow(0px 4px 6px rgba(0,0,0,0.1))" }} />
                 </div>
                 <h3 className="font-outfit font-bold text-[#0B2B26] text-[22px] mb-4">{item.title}</h3>
                 <p className="text-[16px] text-[#235347] leading-relaxed font-medium flex-1">{item.desc}</p>

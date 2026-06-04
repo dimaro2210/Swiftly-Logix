@@ -1,20 +1,12 @@
 import { useEffect, useState } from "react";
 import { useParams, Link } from "wouter";
-import { AlertTriangle, Package } from "lucide-react";
-import { getShareByToken } from "@/lib/shareStore";
-import { getShipments } from "@/lib/shipmentStore";
+import { AlertTriangle } from "lucide-react";
+import { getShareByToken, decodeShareToken } from "@/lib/shareStore";
+import { getShipmentById, saveShipment } from "@/lib/shipmentStore";
 import type { Shipment } from "@/lib/shipmentStore";
 import Dashboard from "@/pages/Dashboard";
 import Header from "@/components/Header";
 
-/**
- * SharedDashboard is a thin wrapper that:
- * 1. Resolves the share token from the URL
- * 2. Finds the matching shipment
- * 3. Renders the real Dashboard component in "shared mode"
- *
- * This guarantees pixel-perfect parity with the main dashboard.
- */
 export default function SharedDashboard() {
   const params = useParams<{ token: string }>();
   const token = params.token;
@@ -32,27 +24,47 @@ export default function SharedDashboard() {
       return;
     }
 
-    const share = getShareByToken(token);
-    if (!share) {
-      setError("This link is invalid or has been revoked by the sender.");
-      setLoading(false);
-      return;
-    }
+    (async () => {
+      try {
+        // Try decoding old base64 tokens first for backwards compatibility
+        const decoded = decodeShareToken(token);
+        if (decoded && decoded.s) {
+          const shipmentData = decoded.s as Shipment;
+          await saveShipment(shipmentData); // ensure it's saved to supabase if needed
+          setShipment(shipmentData);
+          setSenderEmail(decoded.se);
+          setRecipientName(decoded.rn || "Recipient");
+          setLoading(false);
+          return;
+        }
 
-    const all = getShipments();
-    const found = all.find((s) => s.id === share.shipmentId);
-    if (!found) {
-      setError("Shipment not found. It may have been removed.");
-      setLoading(false);
-      return;
-    }
+        // New token lookup via Supabase
+        const share = await getShareByToken(token);
+        if (!share) {
+          setError("This link is invalid or has been revoked by the sender.");
+          setLoading(false);
+          return;
+        }
 
-    setShipment(found);
-    setSenderEmail(share.senderEmail);
-    setRecipientName(
-      found.to?.name || found.receiver_name || share.recipientLabel || "Recipient"
-    );
-    setLoading(false);
+        const found = await getShipmentById(share.shipmentId);
+        if (!found) {
+          setError("Shipment not found. It may have been removed.");
+          setLoading(false);
+          return;
+        }
+
+        setShipment(found);
+        setSenderEmail(share.senderEmail);
+        setRecipientName(
+          found.to?.name || found.receiver_name || share.recipientLabel || "Recipient"
+        );
+      } catch (err) {
+        console.error("SharedDashboard load error:", err);
+        setError("Something went wrong loading this shipment.");
+      } finally {
+        setLoading(false);
+      }
+    })();
   }, [token]);
 
   // Loading state

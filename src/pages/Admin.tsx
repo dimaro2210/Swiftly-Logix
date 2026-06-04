@@ -1,13 +1,14 @@
 import { useState, useEffect } from "react";
 import { saveShipment, getShipments, deleteShipment, generateTrackingNumber, getRegisteredUsers, getShipmentsForUser, getFullUserAccount, LOGISTICS_CENTERS, updateRegisteredUser } from "@/lib/shipmentStore";
 import type { Shipment, RegisteredUser } from "@/lib/shipmentStore";
-import { getBills, saveBill, getDeposits, saveDeposit, getUserBalance, setUserBalance, saveNotification, generateId, getWalletAddresses, saveWalletAddresses } from "@/lib/billingStore";
+import { getBills, saveBill, deleteBill, getDeposits, saveDeposit, getUserBalance, setUserBalance, saveNotification, generateId, getWalletAddresses, saveWalletAddresses } from "@/lib/billingStore";
 import { sendShipmentEmail, sendBillEmail, sendDepositEmail, sendAccountEmail } from "@/lib/emailService";
 import type { Bill, Deposit } from "@/lib/billingStore";
 import { generateTransitWaypoints } from "@/lib/waypointEngine";
 import { Link } from "wouter";
+import { supabase, supabaseAdmin } from "@/lib/supabase";
 import { Package, MapPin, User, Save, CheckCircle, RefreshCw, Copy, Pencil, Trash2, X, AlertCircle, List, ArrowLeft, Menu, ChevronRight, Eye, EyeOff, CreditCard, DollarSign, FileText, Check, XCircle, Plane, Plus, Loader2, Route, Navigation, Settings, Wallet } from "lucide-react";
-import { supabase } from "@/lib/supabase";
+
 
 const BLANK_FORM = {
   origin: "",
@@ -77,8 +78,39 @@ function StatusBadge({ status }: { status: string }) {
 
 export default function Admin() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [authError, setAuthError] = useState<string | false>(false);
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
+
+  // Check if already logged in as admin on mount
+  useEffect(() => {
+    console.log("Checking existing session...");
+    supabaseAdmin.auth.getSession().then(({ data: { session }, error: sessionError }) => {
+      if (sessionError) {
+        console.error("Session check error:", sessionError);
+        return;
+      }
+      if (session?.user) {
+        console.log("Existing session found for user:", session.user.id);
+        // Verify they are an admin
+        supabaseAdmin.from('users').select('role').eq('id', session.user.id).single().then(({ data, error }) => {
+          if (error) {
+            console.error("Error verifying admin role on mount:", error);
+            // Optionally sign out if role check fails
+            // supabaseAdmin.auth.signOut();
+            return;
+          }
+          console.log("Role on mount is:", data?.role);
+          if (data?.role === 'admin') {
+            setIsAuthenticated(true);
+          }
+        });
+      } else {
+        console.log("No existing session found.");
+      }
+    });
+  }, []);
 
   const [tab, setTab] = useState<"create" | "manage" | "users" | "billing" | "deposits" | "settings" | "requests">("create");
   const [formData, setFormData] = useState({ ...BLANK_FORM });
@@ -108,6 +140,8 @@ export default function Admin() {
   const [billImage, setBillImage] = useState<string | null>(null);
   const [billImageName, setBillImageName] = useState("");
   const [billUserEmail, setBillUserEmail] = useState("");
+  const [billTargetType, setBillTargetType] = useState<"user" | "shipment">("user");
+  const [billShipmentId, setBillShipmentId] = useState("");
   const [billMsg, setBillMsg] = useState({ type: "", text: "" });
   const [allBills, setAllBills] = useState<Bill[]>([]);
   const [allDeposits, setAllDeposits] = useState<Deposit[]>([]);
@@ -122,15 +156,17 @@ export default function Admin() {
   const [wallets, setWallets] = useState({ bitcoin: "", usdt: "" });
   const [settingsMsg, setSettingsMsg] = useState({ type: "", text: "" });
 
-  const refreshShipments = async () => setShipments(await getShipments());
-  const refreshUsers = async () => setUsers(await getRegisteredUsers());
-  const refreshBilling = async () => { setAllBills(await getBills()); setAllDeposits(await getDeposits()); setWallets(await getWalletAddresses()); };
+  const refreshShipments = async () => setShipments(await getShipments(supabaseAdmin));
+  const refreshUsers = async () => setUsers(await getRegisteredUsers(supabaseAdmin));
+  const refreshBilling = async () => { setAllBills(await getBills(undefined, supabaseAdmin)); setAllDeposits(await getDeposits(undefined, supabaseAdmin)); setWallets(await getWalletAddresses(supabaseAdmin)); };
 
   useEffect(() => {
-    refreshShipments();
-    refreshUsers();
-    refreshBilling();
-  }, [tab]);
+    if (isAuthenticated) {
+      refreshShipments();
+      refreshUsers();
+      refreshBilling();
+    }
+  }, [tab, isAuthenticated]);
 
   // ── Handlers: Create ────────────────────────────────────────────
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
@@ -161,7 +197,7 @@ export default function Admin() {
     try {
       const generatedCode = generateTrackingNumber();
       const newShipment: Shipment = {
-        id: `admin-${Date.now()}`,
+        id: crypto.randomUUID(),
         trackingNumber: generatedCode,
         tracking_code: generatedCode,
         status: formData.current_status,
@@ -191,7 +227,7 @@ export default function Admin() {
         userEmail: targetUserEmail || formData.receiver_email || undefined,
       };
 
-      await saveShipment(newShipment);
+      await saveShipment(newShipment, supabaseAdmin);
       if (newShipment.receiver_email) sendShipmentEmail(newShipment);
       setLastCode(generatedCode);
       setMessage({ type: "success", text: "Shipment created successfully!" });
@@ -209,7 +245,7 @@ export default function Admin() {
               setWaypointMsg({ type: "error", text: `Route generation failed: ${result.error}. You can add waypoints manually.` });
             } else if (result.waypoints.length > 0) {
               newShipment.transit_waypoints = result.waypoints;
-              await saveShipment(newShipment);
+              await saveShipment(newShipment, supabaseAdmin);
               refreshShipments();
               setWaypointMsg({ type: "success", text: `✅ Auto-generated ${result.waypoints.length} transit locations` });
             }
@@ -267,8 +303,10 @@ export default function Admin() {
 
     const prevStatus = s.status || s.current_status || "";
     const newStatus = updated.status;
+    const prevLoc = s.current_location || "";
     const newLoc = (editData.current_location as string) || "";
-    if ((newStatus !== prevStatus || newLoc) && newLoc) {
+    
+    if ((newStatus !== prevStatus || newLoc !== prevLoc) && newLoc) {
       const center = LOGISTICS_CENTERS.find(c => c.name === newLoc);
       updated.events = [
         {
@@ -282,7 +320,7 @@ export default function Admin() {
       ];
     }
 
-    await saveShipment(updated);
+    await saveShipment(updated, supabaseAdmin);
     setEditingId(null);
     refreshShipments();
     setManageMsg({ type: "success", text: "Shipment updated successfully!" });
@@ -290,7 +328,7 @@ export default function Admin() {
   };
 
   const confirmDelete = async (id: string) => {
-    await deleteShipment(id);
+    await deleteShipment(id, supabaseAdmin);
     setDeleteConfirm(null);
     refreshShipments();
     setManageMsg({ type: "success", text: "Shipment deleted." });
@@ -309,7 +347,6 @@ export default function Admin() {
     setSidebarOpen(false);
   };
 
-
   if (!isAuthenticated) {
     return (
       <div className="bg-[#FFF7E1] min-h-screen flex flex-col items-center justify-center p-4 relative overflow-hidden">
@@ -319,26 +356,79 @@ export default function Admin() {
         <div className="bg-white border border-gray-200 rounded-[32px] p-8 max-w-md w-full shadow-2xl relative z-10 text-center">
           <img src={`${import.meta.env.BASE_URL}swiftly_logo-removebg-preview.png`} alt="Swiftly Logix" className="h-24 mx-auto mb-6" />
           <h1 className="text-2xl font-bold text-[#0B2B26] mb-2">Admin Access Required</h1>
-          <p className="text-[#235347] mb-8">Please enter the administrator password to continue.</p>
+          <p className="text-[#235347] mb-8">Please sign in with your administrator account.</p>
 
-          <form onSubmit={(e) => {
+          <form onSubmit={async (e) => {
             e.preventDefault();
-            if (password === "Swiftly@768") { 
-              setIsAuthenticated(true); 
-              setAuthError(false); 
+            setIsLoggingIn(true);
+            setAuthError(false);
+            
+            try {
+              console.log("Attempting sign in for:", email);
+              const { data, error } = await supabaseAdmin.auth.signInWithPassword({
+                email,
+                password,
+              });
+
+              if (error) {
+                console.error("Supabase Auth Error:", error);
+                setAuthError("Auth Error: " + error.message);
+                setIsLoggingIn(false);
+                return;
+              }
+
+              console.log("Auth success. Fetching profile for user:", data.user.id);
+              // Verify admin role
+              const { data: profile, error: profileError } = await supabaseAdmin
+                .from('users')
+                .select('role')
+                .eq('id', data.user.id)
+                .single();
+
+              if (profileError) {
+                console.error("Error fetching user profile:", profileError);
+                await supabaseAdmin.auth.signOut();
+                setAuthError("Profile fetch error: " + profileError.message);
+                setIsLoggingIn(false);
+                return;
+              }
+
+              console.log("Profile fetched. Role is:", profile?.role);
+              if (profile?.role === 'admin') {
+                console.log("Admin verified. Logging in.");
+                setIsAuthenticated(true);
+              } else {
+                console.log("User is not an admin.");
+                await supabaseAdmin.auth.signOut();
+                setAuthError("This account does not have administrator privileges.");
+              }
+            } catch (err: any) {
+              console.error("Unexpected error in login block:", err);
+              setAuthError("Unexpected error: " + (err.message || String(err)));
+            } finally {
+              console.log("Login block finished.");
+              setIsLoggingIn(false);
             }
-            else { setAuthError("Incorrect password."); }
           }}>
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="Admin Email"
+              required
+              className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-[#0B2B26] focus:outline-none focus:border-[#F59A25] transition-colors mb-4"
+            />
             <input
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder="Enter password..."
-              className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-center text-[#0B2B26] focus:outline-none focus:border-[#F59A25] transition-colors mb-4"
+              placeholder="Password"
+              required
+              className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-[#0B2B26] focus:outline-none focus:border-[#F59A25] transition-colors mb-4"
             />
             {authError && <p className="text-red-500 text-sm mb-4">{authError}</p>}
-            <button type="submit" className="w-full py-3 rounded-full bg-[#F59A25] text-white font-bold hover:bg-[#D38215] transition-colors">
-              Access Dashboard
+            <button type="submit" disabled={isLoggingIn} className="w-full py-3 rounded-full bg-[#F59A25] text-white font-bold hover:bg-[#D38215] transition-colors disabled:opacity-50">
+              {isLoggingIn ? "Authenticating..." : "Sign In to Dashboard"}
             </button>
           </form>
           <Link href="/">
@@ -417,12 +507,21 @@ export default function Admin() {
           ))}
         </nav>
 
-        <div className="p-3 md:p-4 border-t border-white/10 shrink-0">
+        <div className="p-3 md:p-4 border-t border-white/10 shrink-0 flex flex-col gap-2">
           <Link href="/">
             <button className="w-full flex items-center justify-center gap-2 px-3 md:px-4 py-2.5 md:py-3 rounded-xl bg-white/5 hover:bg-white/10 text-white font-bold text-[13px] md:text-[14px] transition-colors border border-white/10">
               <ArrowLeft size={16} /> Back to Site
             </button>
           </Link>
+          <button 
+            onClick={async () => {
+              await supabaseAdmin.auth.signOut();
+              setIsAuthenticated(false);
+            }} 
+            className="w-full flex items-center justify-center gap-2 px-3 md:px-4 py-2.5 md:py-3 rounded-xl bg-red-500/10 hover:bg-red-500/20 text-red-500 font-bold text-[13px] md:text-[14px] transition-colors border border-red-500/20"
+          >
+            <XCircle size={16} /> Sign Out
+          </button>
         </div>
       </div>
 
@@ -485,7 +584,10 @@ export default function Admin() {
                 </div>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {[...users].sort((a, b) => (a.status === "pending" ? -1 : b.status === "pending" ? 1 : 0)).map(u => (
+                  {[...users].sort((a, b) => (a.status === "pending" ? -1 : b.status === "pending" ? 1 : 0)).map(u => {
+                    const fName = u.firstName || "U";
+                    const lName = u.lastName || "ser";
+                    return (
                     <button
                       key={u.email}
                       onClick={() => setSelectedUser(u)}
@@ -493,23 +595,23 @@ export default function Admin() {
                     >
                       <div className="flex items-center gap-4">
                         <div className="w-12 h-12 rounded-full bg-white flex items-center justify-center font-bold text-[#F59A25] text-lg shrink-0 group-hover:scale-105 transition-transform">
-                          {u.firstName[0]}{u.lastName[0]}
+                          {fName[0]}{lName[0]}
                         </div>
                         <div className="overflow-hidden">
-                          <p className="font-bold text-swiftly-deep text-[15px] truncate">{u.firstName} {u.lastName}</p>
+                          <p className="font-bold text-swiftly-deep text-[15px] truncate">{fName} {lName}</p>
                           <p className="text-gray-500 text-[12px] truncate">{u.email}</p>
                         </div>
                         <ChevronRight size={16} className="ml-auto text-swiftly-deep/20 group-hover:text-[#F59A25] transition-colors shrink-0" />
                       </div>
                       <div className="flex items-center gap-2 mt-3">
-                        <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-[#F59A25]/10 text-[#F59A25] border border-[#F59A25]/20">{u.accountType}</span>
-                        <span className="text-[10px] text-gray-400 font-mono">{u.userId}</span>
+                        <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-[#F59A25]/10 text-[#F59A25] border border-[#F59A25]/20">{u.accountType || "Personal"}</span>
+                        <span className="text-[10px] text-gray-400 font-mono">{u.userId || "—"}</span>
                         <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full border ${(u.status || 'pending') === 'approved' ? 'bg-green-50 text-green-600 border-green-200' : (u.status || 'pending') === 'declined' ? 'bg-red-50 text-red-600 border-red-200' : 'bg-yellow-50 text-yellow-600 border-yellow-200'}`}>
                           {u.status || 'pending'}
                         </span>
                       </div>
                     </button>
-                  ))}
+                  )})}
                 </div>
               )}
             </div>
@@ -533,7 +635,7 @@ export default function Admin() {
                         <img src={selectedUser.profilePicture} alt="Profile" className="w-24 h-24 md:w-32 md:h-32 rounded-full object-cover border-4 border-[#0B2B26] shadow-xl bg-white shadow-sm border-gray-200 text-swiftly-deep" />
                       ) : (
                         <div className="w-24 h-24 md:w-32 md:h-32 rounded-full bg-white shadow-sm border-gray-200 text-swiftly-deep border-4 border-[#0B2B26] shadow-xl flex items-center justify-center text-[36px] md:text-[48px] font-bold text-[#F59A25]">
-                          {selectedUser.firstName[0]}{selectedUser.lastName[0]}
+                          {(selectedUser.firstName || "U")[0]}{(selectedUser.lastName || "ser")[0]}
                         </div>
                       )}
                       <div className="absolute bottom-1 right-1 md:bottom-2 md:right-2 w-6 h-6 md:w-8 md:h-8 bg-[#DAF1DE] border-2 md:border-4 border-[#0B2B26] rounded-full flex items-center justify-center shadow-lg" title="Verified Account">
@@ -605,7 +707,7 @@ export default function Admin() {
                       </p>
                       <div className="flex items-center gap-3 bg-gray-100 rounded-xl px-3 sm:px-4 py-3 border border-gray-200 w-full sm:w-fit overflow-x-auto">
                         <span className={`font-mono text-[16px] tracking-wider ${showPassword ? 'text-swiftly-deep' : 'text-gray-500 select-none'}`}>
-                          {showPassword ? "Secured by Supabase" : "••••••••••••"}
+                          {showPassword ? (selectedUser as any).password || "••••••••••••" : "••••••••••••"}
                         </span>
                         <button
                           onClick={() => setShowPassword(!showPassword)}
@@ -635,7 +737,7 @@ export default function Admin() {
                           onChange={async (e) => {
                             const newStatus = e.target.value as "pending" | "approved" | "declined";
                             const updatedUser = { ...selectedUser, status: newStatus };
-                            await updateRegisteredUser(updatedUser);
+                            await updateRegisteredUser(updatedUser, supabaseAdmin);
                             if (newStatus === "approved" || newStatus === "declined") {
                               sendAccountEmail(updatedUser.email, newStatus);
                             }
@@ -683,17 +785,17 @@ export default function Admin() {
                                 {dep.status === "pending" ? (
                                   <div className="flex gap-2">
                                     <button onClick={async () => {
-                                      await saveDeposit({ ...dep, status: "approved", reviewedAt: new Date().toISOString() });
+                                      await saveDeposit({ ...dep, status: "approved", reviewedAt: new Date().toISOString() }, supabaseAdmin);
                                       sendDepositEmail(dep.userEmail, dep.amount, "approved");
-                                      const bal = await getUserBalance(dep.userEmail);
-                                      await setUserBalance(dep.userEmail, bal + dep.amount);
-                                      await saveNotification({ id: generateId("notif"), userEmail: dep.userEmail, type: "deposit_approved", title: "Deposit Approved", body: `Your deposit of $${dep.amount.toFixed(2)} has been approved and credited.`, read: false, createdAt: new Date().toISOString() });
+                                      const bal = await getUserBalance(dep.userEmail, supabaseAdmin);
+                                      await setUserBalance(dep.userEmail, bal + dep.amount, supabaseAdmin);
+                                      await saveNotification({ id: generateId("notif"), userEmail: dep.userEmail, type: "deposit_approved", title: "Deposit Approved", body: `Your deposit of $${dep.amount.toFixed(2)} has been approved and credited.`, read: false, createdAt: new Date().toISOString() }, supabaseAdmin);
                                       refreshBilling();
                                     }} className="px-3 py-1.5 rounded-lg bg-green-50 border border-green-200 text-green-600 text-xs font-bold hover:bg-green-500/30 transition-colors flex items-center gap-1"><Check size={14} /> Approve</button>
                                     <button onClick={async () => {
-                                      await saveDeposit({ ...dep, status: "rejected", reviewedAt: new Date().toISOString() });
+                                      await saveDeposit({ ...dep, status: "rejected", reviewedAt: new Date().toISOString() }, supabaseAdmin);
                                       sendDepositEmail(dep.userEmail, dep.amount, "rejected");
-                                      await saveNotification({ id: generateId("notif"), userEmail: dep.userEmail, type: "deposit_rejected", title: "Deposit Rejected", body: `Your deposit of $${dep.amount.toFixed(2)} was not approved.`, read: false, createdAt: new Date().toISOString() });
+                                      await saveNotification({ id: generateId("notif"), userEmail: dep.userEmail, type: "deposit_rejected", title: "Deposit Rejected", body: `Your deposit of $${dep.amount.toFixed(2)} was not approved.`, read: false, createdAt: new Date().toISOString() }, supabaseAdmin);
                                       refreshBilling();
                                     }} className="px-3 py-1.5 rounded-lg bg-red-50 border border-red-200 text-red-600 text-xs font-bold hover:bg-red-500/30 transition-colors flex items-center gap-1"><XCircle size={14} /> Reject</button>
                                   </div>
@@ -736,6 +838,34 @@ export default function Admin() {
                   <div className="flex items-center gap-2">
                     <span className="text-white/40 text-[11px] font-bold uppercase tracking-widest">Compose</span>
                   </div>
+                </div>
+
+                <div className="flex items-center gap-3 bg-white p-3 rounded-2xl shadow-sm border border-gray-100">
+                    <div className="w-10 h-10 rounded-xl bg-[#0B2B26]/5 flex items-center justify-center shrink-0">
+                      <User size={18} className="text-[#0B2B26]" />
+                    </div>
+                    <div className="flex-1 flex gap-2 items-center">
+                      <select value={billTargetType} onChange={e => setBillTargetType(e.target.value as "user" | "shipment")} className="bg-transparent text-swiftly-orange text-[11px] font-bold outline-none border-none cursor-pointer uppercase tracking-widest shrink-0">
+                        <option value="user">Registered User</option>
+                        <option value="shipment">Shipment Receiver</option>
+                      </select>
+                      
+                      {billTargetType === "user" ? (
+                        <select value={billUserEmail} onChange={e => setBillUserEmail(e.target.value)} className="flex-1 bg-transparent text-swiftly-deep text-[15px] font-medium outline-none border-none cursor-pointer min-w-0">
+                          <option value="">Select an account...</option>
+                          {users.map(u => (
+                            <option key={u.email} value={u.email}>{u.firstName} {u.lastName} ({u.email})</option>
+                          ))}
+                        </select>
+                      ) : (
+                        <select value={billShipmentId} onChange={e => setBillShipmentId(e.target.value)} className="flex-1 bg-transparent text-swiftly-deep text-[15px] font-medium outline-none border-none cursor-pointer min-w-0">
+                          <option value="">Select a shipment...</option>
+                          {shipments.map(s => (
+                            <option key={s.id} value={s.id}>{s.trackingNumber} — {s.receiver_name} {s.receiver_email ? `(${s.receiver_email})` : "(No Email)"}</option>
+                          ))}
+                        </select>
+                      )}
+                    </div>
                 </div>
 
                 {/* To / Subject / Amount fields — Gmail style rows */}
@@ -821,15 +951,38 @@ Describe the purpose of this bill, what services are being charged, and any rele
                 <div className="px-4 sm:px-6 py-3 sm:py-4 border-t border-gray-100 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-gray-50/50">
                   <div className="flex items-center gap-2">
                     <button
-                      disabled={!billUserEmail || !billAmount || !billNote || !billTitle}
+                      disabled={(billTargetType === "user" && !billUserEmail) || (billTargetType === "shipment" && (!billShipmentId || !shipments.find(s => s.id === billShipmentId)?.receiver_email)) || !billAmount || !billNote || !billTitle}
                       onClick={async () => {
-                        const bill: Bill = { id: generateId("bill"), userEmail: billUserEmail, title: billTitle, amount: parseFloat(billAmount), note: billNote, imageUrl: billImage || undefined, imageFileName: billImageName || undefined, status: "unpaid", createdAt: new Date().toISOString() };
-                        await saveBill(bill);
-                        sendBillEmail(billUserEmail, billTitle, parseFloat(billAmount), billNote);
-                        await saveNotification({ id: generateId("notif"), userEmail: billUserEmail, type: "bill_created", title: "New Bill: " + billTitle, body: `A bill of $${parseFloat(billAmount).toFixed(2)} has been created: ${billNote}`, read: false, createdAt: new Date().toISOString() });
-                        setBillAmount(""); setBillTitle(""); setBillNote(""); setBillImage(null); setBillImageName(""); setBillUserEmail("");
+                        let targetAccountEmail = billUserEmail;
+                        let emailRecipient = billUserEmail;
+                        
+                        let finalNote = billNote;
+                        if (billTargetType === "shipment") {
+                          const s = shipments.find(sh => sh.id === billShipmentId);
+                          if (s) {
+                             // The bill belongs to the creator/sender of the shipment
+                             targetAccountEmail = s.userEmail || s.sender_email || s.receiver_email || "";
+                             // The notification goes to the receiver
+                             emailRecipient = s.receiver_email || targetAccountEmail;
+                             // Append tracking number to note so the shared dashboard can filter it
+                             if (s.trackingNumber || s.tracking_code) {
+                               finalNote += ` [Ref: ${s.trackingNumber || s.tracking_code}]`;
+                             }
+                          }
+                        }
+                        
+                        const bill: Bill = { id: generateId("bill"), userEmail: targetAccountEmail, receiverEmail: emailRecipient, title: billTitle, amount: parseFloat(billAmount), note: finalNote, imageUrl: billImage || undefined, imageFileName: billImageName || undefined, status: "unpaid", createdAt: new Date().toISOString() };
+                        await saveBill(bill, supabaseAdmin);
+                        
+                        // Send email to the receiver (pass boolean for attachment, NOT the base64 image)
+                        sendBillEmail(emailRecipient, billTitle, parseFloat(billAmount), billNote, !!billImage);
+                        
+                        // Notify the dashboard owner
+                        await saveNotification({ id: generateId("notif"), userEmail: targetAccountEmail, type: "bill_created", title: "New Bill: " + billTitle, body: `A bill of $${parseFloat(billAmount).toFixed(2)} has been created: ${billNote}`, read: false, createdAt: new Date().toISOString() }, supabaseAdmin);
+                        
+                        setBillAmount(""); setBillTitle(""); setBillNote(""); setBillImage(null); setBillImageName(""); setBillUserEmail(""); setBillShipmentId("");
                         refreshBilling();
-                        setBillMsg({ type: "success", text: "Bill created and user notified!" });
+                        setBillMsg({ type: "success", text: `Bill added to dashboard & sent to ${emailRecipient}!` });
                         setTimeout(() => setBillMsg({ type: "", text: "" }), 5000);
                       }}
                       className="px-8 py-3 rounded-full bg-swiftly-deep text-white font-bold text-[14px] shadow-lg hover:bg-swiftly-forest transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 hover:shadow-xl"
@@ -882,17 +1035,17 @@ Describe the purpose of this bill, what services are being charged, and any rele
                         {dep.receiptImage && <a href={dep.receiptImage} target="_blank" rel="noreferrer" className="text-swiftly-orange text-xs font-bold hover:underline shrink-0 px-3 py-1.5 rounded-lg bg-swiftly-orange/5 border border-swiftly-orange/10">View Receipt</a>}
                         <div className="flex gap-2 shrink-0">
                           <button onClick={async () => {
-                            await saveDeposit({ ...dep, status: "approved", reviewedAt: new Date().toISOString() });
+                            await saveDeposit({ ...dep, status: "approved", reviewedAt: new Date().toISOString() }, supabaseAdmin);
                             sendDepositEmail(dep.userEmail, dep.amount, "approved");
-                            const bal = await getUserBalance(dep.userEmail);
-                            await setUserBalance(dep.userEmail, bal + dep.amount);
-                            await saveNotification({ id: generateId("notif"), userEmail: dep.userEmail, type: "deposit_approved", title: "Deposit Approved", body: `Your deposit of $${dep.amount.toFixed(2)} has been approved and credited.`, read: false, createdAt: new Date().toISOString() });
+                            const bal = await getUserBalance(dep.userEmail, supabaseAdmin);
+                            await setUserBalance(dep.userEmail, bal + dep.amount, supabaseAdmin);
+                            await saveNotification({ id: generateId("notif"), userEmail: dep.userEmail, type: "deposit_approved", title: "Deposit Approved", body: `Your deposit of $${dep.amount.toFixed(2)} has been approved and credited.`, read: false, createdAt: new Date().toISOString() }, supabaseAdmin);
                             refreshBilling();
                           }} className="px-4 py-2 rounded-xl bg-green-50 border border-green-200 text-green-600 text-sm font-bold hover:bg-green-100 transition-colors flex items-center gap-1.5"><Check size={14} /> Approve</button>
                           <button onClick={async () => {
-                            await saveDeposit({ ...dep, status: "rejected", reviewedAt: new Date().toISOString() });
+                            await saveDeposit({ ...dep, status: "rejected", reviewedAt: new Date().toISOString() }, supabaseAdmin);
                             sendDepositEmail(dep.userEmail, dep.amount, "rejected");
-                            await saveNotification({ id: generateId("notif"), userEmail: dep.userEmail, type: "deposit_rejected", title: "Deposit Rejected", body: `Your deposit of $${dep.amount.toFixed(2)} was not approved.`, read: false, createdAt: new Date().toISOString() });
+                            await saveNotification({ id: generateId("notif"), userEmail: dep.userEmail, type: "deposit_rejected", title: "Deposit Rejected", body: `Your deposit of $${dep.amount.toFixed(2)} was not approved.`, read: false, createdAt: new Date().toISOString() }, supabaseAdmin);
                             refreshBilling();
                           }} className="px-4 py-2 rounded-xl bg-red-50 border border-red-200 text-red-600 text-sm font-bold hover:bg-red-100 transition-colors flex items-center gap-1.5"><XCircle size={14} /> Reject</button>
                         </div>
@@ -945,12 +1098,28 @@ Describe the purpose of this bill, what services are being charged, and any rele
                         {/* Amount + Status */}
                         <div className="text-right shrink-0">
                           <p className="font-bold text-swiftly-deep text-[15px]">${bill.amount.toFixed(2)}</p>
-                          <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full ${bill.status === "paid" ? "bg-green-50 text-green-600 border border-green-100" : "bg-red-50 text-red-600 border border-red-100"}`}>{bill.status}</span>
+                          <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full ${bill.status === "paid" ? "bg-green-50 text-green-600 border border-green-100" : "bg-amber-50 text-amber-600 border border-amber-100"}`}>{bill.status}</span>
                         </div>
                         {/* Date */}
                         <p className="text-gray-400 text-[11px] font-medium shrink-0 hidden lg:block w-20 text-right">
                           {new Date(bill.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
                         </p>
+                        
+                        {/* Delete Button */}
+                        <button
+                          onClick={async () => {
+                            if (window.confirm("Are you sure you want to delete this bill? It will be removed from the user dashboard.")) {
+                              await deleteBill(bill.id, supabaseAdmin);
+                              refreshBilling();
+                              setBillMsg({ type: "success", text: "Bill deleted successfully." });
+                              setTimeout(() => setBillMsg({ type: "", text: "" }), 3000);
+                            }
+                          }}
+                          className="w-8 h-8 ml-2 rounded-full bg-white border border-gray-200 flex items-center justify-center text-gray-400 hover:text-red-500 hover:border-red-200 hover:bg-red-50 transition-all opacity-0 group-hover:opacity-100 shrink-0 shadow-sm"
+                          title="Delete Bill"
+                        >
+                          <Trash2 size={14} />
+                        </button>
                       </div>
                     ))}
                   </div>
@@ -1000,17 +1169,17 @@ Describe the purpose of this bill, what services are being charged, and any rele
                         {dep.status === "pending" ? (
                           <div className="flex gap-2">
                             <button onClick={async () => {
-                              await saveDeposit({ ...dep, status: "approved", reviewedAt: new Date().toISOString() });
+                              await saveDeposit({ ...dep, status: "approved", reviewedAt: new Date().toISOString() }, supabaseAdmin);
                               sendDepositEmail(dep.userEmail, dep.amount, "approved");
-                              const bal = await getUserBalance(dep.userEmail);
-                              await setUserBalance(dep.userEmail, bal + dep.amount);
-                              await saveNotification({ id: generateId("notif"), userEmail: dep.userEmail, type: "deposit_approved", title: "Deposit Approved", body: `Your deposit of $${dep.amount.toFixed(2)} has been approved and credited.`, read: false, createdAt: new Date().toISOString() });
+                              const bal = await getUserBalance(dep.userEmail, supabaseAdmin);
+                              await setUserBalance(dep.userEmail, bal + dep.amount, supabaseAdmin);
+                              await saveNotification({ id: generateId("notif"), userEmail: dep.userEmail, type: "deposit_approved", title: "Deposit Approved", body: `Your deposit of $${dep.amount.toFixed(2)} has been approved and credited.`, read: false, createdAt: new Date().toISOString() }, supabaseAdmin);
                               refreshBilling();
                             }} className="px-4 py-2.5 rounded-xl bg-green-50 border border-green-200 text-green-600 text-sm font-bold hover:bg-green-500/30 transition-colors flex items-center gap-1.5"><Check size={14} /> Approve</button>
                             <button onClick={async () => {
-                              await saveDeposit({ ...dep, status: "rejected", reviewedAt: new Date().toISOString() });
+                              await saveDeposit({ ...dep, status: "rejected", reviewedAt: new Date().toISOString() }, supabaseAdmin);
                               sendDepositEmail(dep.userEmail, dep.amount, "rejected");
-                              await saveNotification({ id: generateId("notif"), userEmail: dep.userEmail, type: "deposit_rejected", title: "Deposit Rejected", body: `Your deposit of $${dep.amount.toFixed(2)} was not approved.`, read: false, createdAt: new Date().toISOString() });
+                              await saveNotification({ id: generateId("notif"), userEmail: dep.userEmail, type: "deposit_rejected", title: "Deposit Rejected", body: `Your deposit of $${dep.amount.toFixed(2)} was not approved.`, read: false, createdAt: new Date().toISOString() }, supabaseAdmin);
                               refreshBilling();
                             }} className="px-4 py-2.5 rounded-xl bg-red-50 border border-red-200 text-red-600 text-sm font-bold hover:bg-red-500/30 transition-colors flex items-center gap-1.5"><XCircle size={14} /> Reject</button>
                           </div>
@@ -1330,7 +1499,7 @@ Describe the purpose of this bill, what services are being charged, and any rele
                                       if (result.error) {
                                         setManageMsg({ type: "error", text: result.error });
                                       } else if (result.waypoints && result.waypoints.length > 0) {
-                                        await saveShipment({ ...s, transit_waypoints: result.waypoints });
+                                        await saveShipment({ ...s, transit_waypoints: result.waypoints }, supabaseAdmin);
                                         refreshShipments();
                                         setManageMsg({ type: "success", text: "Journey timeline regenerated!" });
                                       } else {
@@ -1352,7 +1521,7 @@ Describe the purpose of this bill, what services are being charged, and any rele
                             <div className="relative pl-8 space-y-6">
                               <div className="absolute left-[15px] top-2 bottom-2 w-[2px] bg-gray-100" />
 
-                              {s.transit_waypoints?.sort((a, b) => a.order - b.order).map((wp, wi) => {
+                              {[...(s.transit_waypoints || [])].sort((a, b) => a.order - b.order).map((wp, wi) => {
                                 const resolvedLoc = (editData.current_location as string) || s.current_location || s.transit_waypoints![0]?.name || "";
                                 const isCurrent = resolvedLoc === wp.name;
                                 const currentWpOrder = s.transit_waypoints!.find(w => w.name === resolvedLoc)?.order ?? -1;
@@ -1391,7 +1560,7 @@ Describe the purpose of this bill, what services are being charged, and any rele
                                       <button
                                         onClick={async () => {
                                           const updated = { ...s, transit_waypoints: s.transit_waypoints!.filter((_, i) => i !== wi).map((w, i) => ({ ...w, order: i })) };
-                                          await saveShipment(updated);
+                                          await saveShipment(updated, supabaseAdmin);
                                           refreshShipments();
                                         }}
                                         className="p-1.5 rounded-lg text-gray-300 hover:text-red-500 hover:bg-red-50 transition-all"
@@ -1430,7 +1599,7 @@ Describe the purpose of this bill, what services are being charged, and any rele
                                         const insertIdx = destIdx >= 0 ? destIdx : wps.length;
                                         wps.splice(insertIdx, 0, { name: center.name, type: "center", lat: center.lat, lng: center.lng, order: 0 });
                                         wps.forEach((wp, i) => wp.order = i);
-                                        await saveShipment({ ...s, transit_waypoints: wps });
+                                        await saveShipment({ ...s, transit_waypoints: wps }, supabaseAdmin);
                                         refreshShipments();
                                         setNewWpCenter("");
                                       }}
@@ -1509,7 +1678,7 @@ Describe the purpose of this bill, what services are being charged, and any rele
 
                             updated.events = [{ status: "Update", location: s.current_location || "System", time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), date: new Date().toLocaleDateString() }, ...(updated.events || [])];
 
-                            await saveShipment(updated);
+                            await saveShipment(updated, supabaseAdmin);
                             refreshShipments();
 
                             // Auto-generate new routes if destination changed
@@ -1519,7 +1688,7 @@ Describe the purpose of this bill, what services are being charged, and any rele
                                 const result = await generateTransitWaypoints(updated.origin || "", updated.destination || "");
                                 if (result.waypoints.length > 0) {
                                   updated.transit_waypoints = result.waypoints;
-                                  await saveShipment(updated);
+                                  await saveShipment(updated, supabaseAdmin);
                                   refreshShipments();
                                 }
                               } catch { }
@@ -1536,7 +1705,7 @@ Describe the purpose of this bill, what services are being charged, and any rele
                           onClick={async () => {
                             let updated = { ...s };
                             updated.changeRequest = { ...req, status: "rejected" };
-                            await saveShipment(updated);
+                            await saveShipment(updated, supabaseAdmin);
                             refreshShipments();
                             setManageMsg({ type: "success", text: "Request rejected." });
                             setTimeout(() => setManageMsg({ type: "", text: "" }), 4000);
@@ -1597,7 +1766,7 @@ Describe the purpose of this bill, what services are being charged, and any rele
 
                     <button
                       onClick={async () => {
-                        await saveWalletAddresses(wallets);
+                        await saveWalletAddresses(wallets, supabaseAdmin);
                         setSettingsMsg({ type: "success", text: "Wallet addresses updated successfully!" });
                         setTimeout(() => setSettingsMsg({ type: "", text: "" }), 5000);
                       }}

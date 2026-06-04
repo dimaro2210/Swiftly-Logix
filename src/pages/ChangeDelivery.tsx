@@ -32,7 +32,7 @@ const options = [
 ] as const;
 
 export default function ChangeDelivery() {
-  const { user, isAuthenticated } = useAuth();
+  const { user, isAuthenticated, loading: authLoading } = useAuth();
   const [, navigate] = useLocation();
   
   const [shipments, setShipments] = useState<Shipment[]>([]);
@@ -50,24 +50,27 @@ export default function ChangeDelivery() {
   const [holdLocation, setHoldLocation] = useState("");
 
   useEffect(() => {
-    if (!isAuthenticated) {
+    if (!authLoading && !isAuthenticated) {
       navigate("/auth/login");
       return;
     }
     if (user) {
-      const userShipments = getShipmentsForUser(user.email).filter(s => s.status !== "Delivered");
-      setShipments(userShipments);
-      
-      const params = new URLSearchParams(window.location.search);
-      const tn = params.get("tn");
-      if (tn) {
-        const found = userShipments.find(s => s.trackingNumber === tn);
-        if (found) setSelectedShipmentId(found.id);
-      } else if (userShipments.length > 0) {
-        setSelectedShipmentId(userShipments[0].id);
-      }
+      (async () => {
+        const all = await getShipmentsForUser(user.email);
+        const userShipments = all.filter(s => s.status !== "Delivered");
+        setShipments(userShipments);
+
+        const params = new URLSearchParams(window.location.search);
+        const tn = params.get("tn");
+        if (tn) {
+          const found = userShipments.find(s => s.trackingNumber === tn);
+          if (found) setSelectedShipmentId(found.id);
+        } else if (userShipments.length > 0) {
+          setSelectedShipmentId(userShipments[0].id);
+        }
+      })();
     }
-  }, [isAuthenticated, user, navigate]);
+  }, [isAuthenticated, authLoading, user, navigate]);
 
   const selectedShipment = shipments.find(s => s.id === selectedShipmentId);
 

@@ -1,6 +1,7 @@
-import { useState, useEffect, useMemo, useRef, useCallback } from "react";
-import { useLocation } from "wouter";
-import { ChevronRight, Search, MapPin, Package, Clock, CheckCircle2, AlertTriangle, Navigation, Truck, ArrowRight, Plane } from "lucide-react";
+import { useState, useEffect, useMemo, useRef, useCallback, Component, ErrorInfo, ReactNode } from "react";
+import { useLocation, Link } from "wouter";
+import { ChevronRight, Search, MapPin, Package, Clock, CheckCircle2, AlertTriangle, Navigation, Truck, ArrowRight, Plane, ArrowLeft, Layers, Map as MapIcon, Flag } from "lucide-react";
+import confetti from "canvas-confetti";
 import { getShipments } from "@/lib/shipmentStore";
 import type { Shipment } from "@/lib/shipmentStore";
 import L from "leaflet";
@@ -52,9 +53,9 @@ function buildResultFromShipment(shipment: Shipment): TrackResult {
     weight: shipment.weight ? String(shipment.weight) : "N/A",
     from: fromStr,
     to: toStr,
-    events: (shipment.events || []).map((e, i) => ({
-      status: e.status,
-      location: e.location,
+    events: (Array.isArray(shipment.events) ? shipment.events : []).map((e, i) => ({
+      status: e.status || (e as any).activity || "Unknown Status",
+      location: e.location || "Unknown Location",
       time: e.time,
       date: e.date,
       done: true,
@@ -82,46 +83,138 @@ function buildDemoResult(tn: string): TrackResult {
   };
 }
 
-export default function Tracking() {
+class TrackingErrorBoundary extends Component<{children: ReactNode}, {hasError: boolean, error: Error | null}> {
+  constructor(props: {children: ReactNode}) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, error };
+  }
+  componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+    console.error("Tracking Page Crash:", error, errorInfo);
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="min-h-screen bg-red-50 p-10 flex flex-col items-center justify-center text-center">
+          <AlertTriangle size={64} className="text-red-500 mb-6" />
+          <h1 className="text-3xl font-bold text-red-900 mb-4">Tracking Page Crashed</h1>
+          <p className="text-red-700 mb-4">A critical error occurred while rendering the tracking data.</p>
+          <pre className="bg-white p-6 rounded-xl shadow-lg text-left text-red-600 text-sm overflow-auto max-w-3xl w-full border border-red-200">
+            {this.state.error?.toString()}
+            {"\n\n"}
+            {this.state.error?.stack}
+          </pre>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+export default function TrackingWrapper() {
+  return (
+    <TrackingErrorBoundary>
+      <Tracking />
+    </TrackingErrorBoundary>
+  );
+}
+
+function Tracking() {
   const [, navigate] = useLocation();
   const [trackingInput, setTrackingInput] = useState("");
   const [result, setResult] = useState<TrackResult | null>(null);
   const [searched, setSearched] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [transitWaypoints, setTransitWaypoints] = useState<Array<{ name: string; type: string; lat: number; lng: number; order: number }>>([]);
   const [currentLocation, setCurrentLocation] = useState<string>("");
+  const [mapStyle, setMapStyle] = useState<'streets' | 'satellite' | 'dark'>('streets');
+  const mapStyleRef = useRef(mapStyle);
+  const tileLayerRef = useRef<L.TileLayer | null>(null);
+
+  useEffect(() => {
+    mapStyleRef.current = mapStyle;
+    if (tileLayerRef.current) {
+      const urls: Record<string, string> = {
+        streets: 'https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}',
+        satellite: 'https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}',
+        dark: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
+      };
+      tileLayerRef.current.setUrl(urls[mapStyle]);
+    }
+  }, [mapStyle]);
+
+  useEffect(() => {
+    if (result && result.statusLabel.toLowerCase().includes('delivered')) {
+      const duration = 3 * 1000;
+      const end = Date.now() + duration;
+
+      const frame = () => {
+        confetti({ particleCount: 5, angle: 60, spread: 55, origin: { x: 0 }, colors: ['#F59A25', '#0B2B26', '#22c55e'], zIndex: 9999 });
+        confetti({ particleCount: 5, angle: 120, spread: 55, origin: { x: 1 }, colors: ['#F59A25', '#0B2B26', '#22c55e'], zIndex: 9999 });
+        if (Date.now() < end) requestAnimationFrame(frame);
+      };
+      frame();
+    }
+  }, [result]);
+
+  const doSearch = useCallback(async (tn: string) => {
+    if (!tn.trim()) return;
+    setIsLoading(true);
+    try {
+      // Fetch with a 10-second timeout to prevent indefinite hanging on network errors
+      const fetchPromise = getShipments();
+      const timeoutPromise = new Promise<Shipment[]>((_, reject) => setTimeout(() => reject(new Error("Timeout")), 10000));
+      
+      let all: Shipment[] = [];
+      try {
+        all = await Promise.race([fetchPromise, timeoutPromise]);
+      } catch (err) {
+        console.error("Tracking network error:", err);
+        // On network failure, we will naturally fall through to the demo result
+      }
+      
+      const found = all.find((s) => (s.trackingNumber?.toLowerCase() === tn.trim().toLowerCase()) || (s.tracking_code?.toLowerCase() === tn.trim().toLowerCase()));
+      if (found) {
+        setResult(buildResultFromShipment(found));
+        setNotice(found.notice && found.notice.trim() ? found.notice.trim() : null);
+        setTransitWaypoints(Array.isArray(found.transit_waypoints) ? found.transit_waypoints : []);
+        setCurrentLocation(found.current_location || "");
+      } else {
+        setResult(buildDemoResult(tn.trim()));
+        setNotice(null);
+        setTransitWaypoints([]);
+        setCurrentLocation("");
+      }
+      setSearched(true);
+      navigate(`/tracking?tn=${encodeURIComponent(tn.trim())}`, { replace: false });
+    } finally {
+      setIsLoading(false);
+    }
+  }, [navigate]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const tn = params.get("tn");
     if (tn) { setTrackingInput(tn); doSearch(tn); }
-  }, []);
+  }, [doSearch]);
 
-  async function doSearch(tn: string) {
-    if (!tn.trim()) return;
-    const all = await getShipments();
-    const found = all.find((s) => (s.trackingNumber?.toLowerCase() === tn.trim().toLowerCase()) || (s.tracking_code?.toLowerCase() === tn.trim().toLowerCase()));
-    if (found) {
-      setResult(buildResultFromShipment(found));
-      setNotice(found.notice && found.notice.trim() ? found.notice.trim() : null);
-      setTransitWaypoints(found.transit_waypoints || []);
-      setCurrentLocation(found.current_location || "");
-    } else {
-      setResult(buildDemoResult(tn.trim()));
-      setNotice(null);
-      setTransitWaypoints([]);
-      setCurrentLocation("");
-    }
-    setSearched(true);
-    window.history.pushState({}, "", `/tracking?tn=${encodeURIComponent(tn.trim())}`);
-  }
+  useEffect(() => {
+    const handleStorage = () => {
+      if (searched && trackingInput) doSearch(trackingInput);
+    };
+    window.addEventListener("storage", handleStorage);
+    return () => window.removeEventListener("storage", handleStorage);
+  }, [searched, trackingInput, doSearch]);
 
   const handleSearch = () => doSearch(trackingInput);
 
   const pathCoords = useMemo(() => {
     if (!result) return [];
-    if (transitWaypoints.length > 0) {
-      return transitWaypoints
+    if (Array.isArray(transitWaypoints) && transitWaypoints.length > 0) {
+      return [...transitWaypoints]
         .sort((a, b) => a.order - b.order)
         .map(wp => [wp.lat, wp.lng] as [number, number]);
     }
@@ -130,6 +223,16 @@ export default function Tracking() {
       .map(e => [e.coordinates!.lat, e.coordinates!.lng] as [number, number])
       .reverse(); 
   }, [result, transitWaypoints]);
+
+  const totalDistance = useMemo(() => {
+    let dist = 0;
+    if (pathCoords.length > 1) {
+      for (let i = 0; i < pathCoords.length - 1; i++) {
+        dist += L.latLng(pathCoords[i][0], pathCoords[i][1]).distanceTo(L.latLng(pathCoords[i+1][0], pathCoords[i+1][1]));
+      }
+    }
+    return Math.round(dist / 1000);
+  }, [pathCoords]);
 
   // ── Vanilla Leaflet Map ────────────────────────────────────────
   const trackingMapRef = useRef<L.Map | null>(null);
@@ -148,8 +251,13 @@ export default function Tracking() {
     L.control.zoom({ position: 'topright' }).addTo(map);
     trackingMapRef.current = map;
 
-    L.tileLayer('https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}', {
-      attribution: '&copy; Google Maps',
+    const urls: Record<string, string> = {
+      streets: 'https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}',
+      satellite: 'https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}',
+      dark: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
+    };
+    tileLayerRef.current = L.tileLayer(urls[mapStyleRef.current], {
+      attribution: '&copy; Map Data',
       maxZoom: 20,
     }).addTo(map);
 
@@ -214,23 +322,78 @@ export default function Tracking() {
               </svg>
             </div>`;
           const vehicleIcon = L.divIcon({ className: 'custom-map-marker', html: vehicleHtml, iconSize: [48, 48], iconAnchor: [24, 24] });
-          L.marker([wp.lat, wp.lng], { icon: vehicleIcon, zIndexOffset: 1000 })
+          const vMarker = L.marker(trailPoints.length > 0 ? trailPoints[0] : [wp.lat, wp.lng], { icon: vehicleIcon, zIndexOffset: 1000 })
             .addTo(map)
             .bindPopup(`<div style="font-family:-apple-system,sans-serif;"><strong style="color:#F59A25;">📍 Current Location</strong><br><span style="font-weight:600;">${wp.name}</span><br><span style="color:#6b7280;font-size:0.85rem;">${wp.type === 'center' ? 'Distribution Center' : wp.type === 'origin' ? 'Pickup Location' : wp.type}</span></div>`);
+          
+          if (trailPoints.length > 1) {
+            const duration = 2500;
+            const startTime = performance.now();
+            const segments = [];
+            let cDist = 0;
+            for(let i=0; i<trailPoints.length - 1; i++){
+               const p1 = L.latLng(trailPoints[i]);
+               const p2 = L.latLng(trailPoints[i+1]);
+               const d = p1.distanceTo(p2);
+               segments.push({ p1, p2, dist: d, cum: cDist });
+               cDist += d;
+            }
+            const animate = (time) => {
+              const elapsed = time - startTime;
+              let progress = Math.min(elapsed / duration, 1);
+              progress = 1 - Math.pow(1 - progress, 3);
+              const currentDist = progress * cDist;
+              let currentSeg = segments[0];
+              for (const seg of segments) {
+                if (currentDist >= seg.cum && currentDist <= seg.cum + seg.dist) {
+                  currentSeg = seg; break;
+                }
+              }
+              if (currentSeg) {
+                const segProgress = currentSeg.dist > 0 ? (currentDist - currentSeg.cum) / currentSeg.dist : 1;
+                const clat = currentSeg.p1.lat + (currentSeg.p2.lat - currentSeg.p1.lat) * segProgress;
+                const clng = currentSeg.p1.lng + (currentSeg.p2.lng - currentSeg.p1.lng) * segProgress;
+                vMarker.setLatLng([clat, clng]);
+              }
+              if (progress < 1) requestAnimationFrame(animate);
+            };
+            requestAnimationFrame(animate);
+          }
         } else if (isPassed && wp.type !== "destination") {
-          // ── Small passed waypoint dot ──
-          const dotHtml = `<div style="width:12px;height:12px;background:#9ca3af;border-radius:50%;border:2px solid white;box-shadow:0 2px 4px rgba(0,0,0,0.2);"></div>`;
-          const dotIcon = L.divIcon({ className: 'custom-map-marker', html: dotHtml, iconSize: [12, 12], iconAnchor: [6, 6] });
-          L.marker([wp.lat, wp.lng], { icon: dotIcon })
+          // ── Passed waypoint dot or Origin Pin ──
+          let markerHtml = `<div style="width:12px;height:12px;background:#9ca3af;border-radius:50%;border:2px solid white;box-shadow:0 2px 4px rgba(0,0,0,0.2);"></div>`;
+          let iconSize: [number, number] = [12, 12];
+          let iconAnchor: [number, number] = [6, 6];
+          
+          if (wp.type === 'origin' || index === 0) {
+            markerHtml = `<div style="width:32px;height:32px;display:flex;align-items:center;justify-content:center;background:#22c55e;border-radius:50%;border:3px solid white;box-shadow:0 4px 10px rgba(34,197,94,0.4);"><svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"></path><line x1="4" y1="22" x2="4" y2="15"></line></svg></div>`;
+            iconSize = [32, 32];
+            iconAnchor = [16, 16];
+          }
+          
+          const icon = L.divIcon({ className: 'custom-map-marker', html: markerHtml, iconSize, iconAnchor });
+          L.marker([wp.lat, wp.lng], { icon: icon })
             .addTo(map)
-            .bindPopup(`<div style="font-family:-apple-system,sans-serif;"><strong>${wp.name}</strong><br><span style="color:#22c55e;font-size:0.85rem;">✓ Passed</span></div>`);
+            .bindPopup(`<div style="font-family:-apple-system,sans-serif;"><strong>${wp.name}</strong><br><span style="color:#22c55e;font-size:0.85rem;">${index === 0 ? 'Origin' : '✓ Passed'}</span></div>`);
         }
         // Don't show markers for future waypoints or destination
       });
 
-      // Draw the gray trail (from origin to current location)
+      // Destination Pin
+      const destWp = sorted[sorted.length - 1];
+      if (destWp && destWp.name !== resolvedLocation) {
+        const destHtml = `<div style="width:32px;height:32px;display:flex;align-items:center;justify-content:center;background:#ef4444;border-radius:50%;border:3px solid white;box-shadow:0 4px 10px rgba(239,68,68,0.4);"><svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"></path><line x1="4" y1="22" x2="4" y2="15"></line></svg></div>`;
+        const destIcon = L.divIcon({ className: 'custom-map-marker', html: destHtml, iconSize: [32, 32], iconAnchor: [16, 16] });
+        L.marker([destWp.lat, destWp.lng], { icon: destIcon }).addTo(map)
+          .bindPopup(`<div style="font-family:-apple-system,sans-serif;"><strong>${destWp.name}</strong><br><span style="color:#ef4444;font-size:0.85rem;">Destination</span></div>`);
+      }
+
+      // Draw the yellow trail (from origin to current location)
       if (trailPoints.length > 1) {
-        L.polyline(trailPoints, { color: '#9ca3af', weight: 3, opacity: 0.8, dashArray: '8, 8' }).addTo(map);
+        // Dark outline for contrast on any background
+        L.polyline(trailPoints, { color: '#0B2B26', weight: 8, opacity: 0.35 }).addTo(map);
+        // Bright yellow trail line
+        L.polyline(trailPoints, { color: '#FFD600', weight: 5, opacity: 1, dashArray: '12, 6' }).addTo(map);
       }
 
     } else if (result && result.events) {
@@ -286,9 +449,12 @@ export default function Tracking() {
         }
       });
 
-      // Gray dashed trail for event-based tracking
+      // Yellow dashed trail for event-based tracking
       if (allPoints.length > 1) {
-        L.polyline(allPoints, { color: '#9ca3af', weight: 3, opacity: 0.8, dashArray: '8, 8' }).addTo(map);
+        // Dark outline for contrast on any background
+        L.polyline(allPoints, { color: '#0B2B26', weight: 8, opacity: 0.35 }).addTo(map);
+        // Bright yellow trail line
+        L.polyline(allPoints, { color: '#FFD600', weight: 5, opacity: 1, dashArray: '12, 6' }).addTo(map);
       }
     }
 
@@ -350,6 +516,23 @@ export default function Tracking() {
       {/* ── Search Section ── */}
       <div className="pt-24 md:pt-28 pb-8 md:pb-10 px-4">
         <div className="max-w-2xl mx-auto text-center">
+          {(() => {
+            const params = new URLSearchParams(window.location.search);
+            const fromShared = params.get('fromShared');
+            if (fromShared) {
+              return (
+                <div className="mb-8 flex justify-center">
+                  <Link href={`/shared/${fromShared}`}>
+                    <button className="px-5 py-2.5 rounded-xl bg-white hover:bg-gray-50 border border-gray-200 text-swiftly-deep font-bold text-[13px] flex items-center gap-2 transition-all shadow-sm">
+                      <ArrowLeft size={16} /> Back to Shared Dashboard
+                    </button>
+                  </Link>
+                </div>
+              );
+            }
+            return null;
+          })()}
+          
           <p className="text-[#F59A25] text-xs font-bold uppercase tracking-[0.2em] mb-3">Track Shipment</p>
           <h1 className="text-3xl md:text-5xl font-outfit font-bold text-[#0B2B26] mb-8 leading-tight">Where's your package?</h1>
 
@@ -386,7 +569,12 @@ export default function Tracking() {
       {/* ── Content (Grid Layout) ── */}
       <div className="max-w-6xl mx-auto px-4 pb-20">
 
-        {!searched ? (
+        {isLoading ? (
+          <div className="flex flex-col items-center justify-center py-20 text-[#235347]">
+            <div className="animate-spin rounded-full h-16 w-16 border-t-4 border-b-4 border-[#F59A25] mb-4"></div>
+            <p className="text-lg font-medium animate-pulse">Locating your shipment...</p>
+          </div>
+        ) : !searched ? (
           /* ── Default Feature Cards ── */
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 mt-4">
             {[
@@ -500,6 +688,29 @@ export default function Tracking() {
               {/* Map Container - Sleek and rounded */}
               <div className="rounded-[2rem] overflow-hidden border border-gray-100 shadow-sm bg-white p-2">
                 <div className="rounded-[1.5rem] overflow-hidden relative">
+                  {/* Map Controls */}
+                  <div className="absolute top-4 left-4 z-[400] flex flex-col gap-2 pointer-events-none">
+                    {/* Distance / ETA Overlay */}
+                    <div className="bg-white/95 backdrop-blur-md px-4 py-3 rounded-xl shadow-lg border border-gray-100 flex items-center gap-3 pointer-events-auto transition-transform hover:scale-105">
+                      <div className="w-10 h-10 rounded-full bg-[#FFF7E1] flex items-center justify-center border border-[#F59A25]/20">
+                        <MapIcon className="text-[#F59A25]" size={20} />
+                      </div>
+                      <div>
+                        <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-0.5">Route Distance</p>
+                        <p className="text-[#0B2B26] font-bold text-sm">
+                          {totalDistance > 0 ? `${totalDistance} km` : 'Calculating...'}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="absolute top-4 right-4 z-[400] pointer-events-auto">
+                    <div className="bg-white/95 backdrop-blur-md rounded-xl shadow-lg border border-gray-100 p-1 flex items-center">
+                      <button onClick={() => setMapStyle('streets')} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${mapStyle === 'streets' ? 'bg-[#0B2B26] text-white' : 'text-gray-500 hover:bg-gray-100'}`}>Map</button>
+                      <button onClick={() => setMapStyle('satellite')} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${mapStyle === 'satellite' ? 'bg-[#0B2B26] text-white' : 'text-gray-500 hover:bg-gray-100'}`}>Satellite</button>
+                      <button onClick={() => setMapStyle('dark')} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${mapStyle === 'dark' ? 'bg-[#0B2B26] text-white' : 'text-gray-500 hover:bg-gray-100'}`}>Dark</button>
+                    </div>
+                  </div>
                   {pathCoords.length > 0 ? (
                     <div ref={mapContainerRef} id="trackingMap" style={{ height: '400px', width: '100%', zIndex: 1 }} />
                   ) : (
@@ -530,7 +741,8 @@ export default function Tracking() {
                   <div className="relative pl-3 space-y-6 max-h-[600px] overflow-y-auto pr-4 scrollbar-thin scrollbar-thumb-gray-200 scrollbar-track-transparent">
                     <div className="absolute left-[17px] top-2 bottom-6 w-px bg-gray-100" />
                     {(() => {
-                      const sortedWps = [...transitWaypoints].sort((a, b) => a.order - b.order);
+                      const wpsArray = Array.isArray(transitWaypoints) ? transitWaypoints : [];
+                      const sortedWps = [...wpsArray].sort((a, b) => a.order - b.order);
                       const resolvedLoc = currentLocation || sortedWps[0]?.name || "";
                       const currentOrder = sortedWps.find(w => w.name === resolvedLoc)?.order ?? -1;
 

@@ -1,11 +1,12 @@
 import { useAuth } from "@/context/AuthContext";
 import { useLocation, Link } from "wouter";
 import { useEffect, useState, useCallback } from "react";
-import { Bell, Plus, X, Package, Clock, MapPin, ShieldCheck, CreditCard, HelpCircle, Camera, User, ChevronRight, Settings, CheckCircle2, TrendingUp, Search, DollarSign, FileText, AlertCircle, Share2, Copy, Link2, Trash2 } from "lucide-react";
+import { Bell, Plus, X, Package, Clock, MapPin, ShieldCheck, CreditCard, HelpCircle, Camera, User, ChevronRight, Settings, CheckCircle2, TrendingUp, Search, DollarSign, FileText, AlertCircle, Share2, Copy, Link2, Trash2, Loader2, ArrowLeft, Wallet, AlertTriangle, Bitcoin, Upload, Check } from "lucide-react";
 import { getShipments, deleteShipment, getShipmentsForUser } from "@/lib/shipmentStore";
 import type { Shipment } from "@/lib/shipmentStore";
-import { getNotifications, markAllNotificationsRead, getUnreadCount, getBills } from "@/lib/billingStore";
-import type { Notification, Bill } from "@/lib/billingStore";
+import { getNotifications, markAllNotificationsRead, getUnreadCount, getBills, saveBill, getUserBalance, setUserBalance, getDeposits, saveDeposit, generateId, getWalletAddresses } from "@/lib/billingStore";
+import type { Notification, Bill, Deposit } from "@/lib/billingStore";
+import { sendBillPaidEmail } from "@/lib/emailService";
 import { motion, AnimatePresence } from "framer-motion";
 import { createShareLink, buildShareUrl, getSharesForShipment, revokeShareLink } from "@/lib/shareStore";
 
@@ -89,7 +90,7 @@ interface DashboardProps {
 }
 
 export default function Dashboard({ sharedShipment, sharedRecipientName, sharedSenderEmail }: DashboardProps = {}) {
-  const { user, updateProfilePicture, isAuthenticated } = useAuth();
+  const { user, updateProfilePicture, isAuthenticated, loading } = useAuth();
   const [, navigate] = useLocation();
   const isSharedMode = !!sharedShipment;
 
@@ -99,9 +100,37 @@ export default function Dashboard({ sharedShipment, sharedRecipientName, sharedS
     if (!file) return;
     const reader = new FileReader();
     reader.onload = (event) => {
-      const dataUri = event.target?.result as string;
-      if (updateProfilePicture) updateProfilePicture(dataUri);
-      showToast("Profile picture updated");
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement("canvas");
+        const MAX_WIDTH = 256;
+        const MAX_HEIGHT = 256;
+        let width = img.width;
+        let height = img.height;
+
+        if (width > height) {
+          if (width > MAX_WIDTH) {
+            height *= MAX_WIDTH / width;
+            width = MAX_WIDTH;
+          }
+        } else {
+          if (height > MAX_HEIGHT) {
+            width *= MAX_HEIGHT / height;
+            height = MAX_HEIGHT;
+          }
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d");
+        ctx?.drawImage(img, 0, 0, width, height);
+        
+        // Compress to JPEG with 0.7 quality
+        const dataUri = canvas.toDataURL("image/jpeg", 0.7);
+        if (updateProfilePicture) updateProfilePicture(dataUri);
+        showToast("Profile picture updated");
+      };
+      img.src = event.target?.result as string;
     };
     reader.readAsDataURL(file);
   };
@@ -117,20 +146,56 @@ export default function Dashboard({ sharedShipment, sharedRecipientName, sharedS
   const [unreadCount, setUnreadCount] = useState(0);
   const [unpaidBillsCount, setUnpaidBillsCount] = useState(0);
   const [shareModal, setShareModal] = useState<{ shipment: Shipment; url: string } | null>(null);
+  const [shareLinks, setShareLinks] = useState<any[]>([]);
+
+  // ── Shared mode billing state ──
+  const [sharedBalance, setSharedBalance] = useState(0);
+  const [sharedBills, setSharedBills] = useState<Bill[]>([]);
+  const [showSharedDeposit, setShowSharedDeposit] = useState(false);
+  const [sharedDepositStep, setSharedDepositStep] = useState<1|2|3|4|5>(1);
+  const [sharedDepositAmount, setSharedDepositAmount] = useState("");
+  const [sharedDepositMethod, setSharedDepositMethod] = useState<"bitcoin"|"usdt">("bitcoin");
+  const [sharedReceiptFile, setSharedReceiptFile] = useState<string|null>(null);
+  const [sharedReceiptName, setSharedReceiptName] = useState("");
+  const [sharedCopied, setSharedCopied] = useState(false);
+  const [sharedWallets, setSharedWallets] = useState({ bitcoin: "", usdt: "" });
+  const [sharedPayBill, setSharedPayBill] = useState<Bill|null>(null);
+  const [sharedPayStep, setSharedPayStep] = useState<"confirm"|"loading"|"success"|null>(null);
 
   const reload = useCallback(async () => { 
     if (isSharedMode) {
       setShipments([sharedShipment!]);
+      const recvEmail = sharedShipment!.receiver_email || "";
       if (sharedSenderEmail) {
-        const notifs = await getNotifications(sharedSenderEmail);
-        setNotifications(notifs);
-        setUnreadCount(await getUnreadCount(sharedSenderEmail));
+        let notifs = await getNotifications(sharedSenderEmail);
+        if (recvEmail && recvEmail.toLowerCase() !== sharedSenderEmail.toLowerCase()) {
+          const recvNotifs = await getNotifications(recvEmail);
+          notifs = [...notifs, ...recvNotifs].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+        }
+        
+        // Filter for shared dashboard: only show deposit notifications and paid invoices
+        const sharedNotifs = notifs.filter(n => ["deposit_approved", "deposit_rejected", "bill_paid"].includes(n.type));
+        
+        // Remove duplicates by ID just in case
+        const uniqueNotifs = Array.from(new Map(sharedNotifs.map(item => [item.id, item])).values());
+        
+        setNotifications(uniqueNotifs);
+        setUnreadCount(uniqueNotifs.filter(n => !n.read).length);
+        
         const allBills = await getBills(sharedSenderEmail);
         setUnpaidBillsCount(allBills.filter(b => b.status === "unpaid").length);
       } else {
         setNotifications([]);
         setUnreadCount(0);
         setUnpaidBillsCount(0);
+      }
+      // Load shared user's own balance + bills (keyed by receiver email)
+      if (recvEmail) {
+        setSharedBalance(await getUserBalance(recvEmail));
+        // Load bills assigned to the shipment owner but filter for this shipment
+        const ownerBills = sharedSenderEmail ? await getBills(sharedSenderEmail) : [];
+        setSharedBills(ownerBills);
+        setSharedWallets(await getWalletAddresses());
       }
       return;
     }
@@ -144,7 +209,7 @@ export default function Dashboard({ sharedShipment, sharedRecipientName, sharedS
     }
   }, [user, isSharedMode, sharedShipment, sharedSenderEmail]);
   
-  useEffect(() => { if (!isSharedMode && !isAuthenticated) navigate("/auth/login"); }, [isAuthenticated, navigate, isSharedMode]);
+  useEffect(() => { if (!isSharedMode && !loading && !isAuthenticated) navigate("/auth/login"); }, [isAuthenticated, loading, navigate, isSharedMode]);
   useEffect(() => { reload(); const h = () => reload(); window.addEventListener("storage", h); return () => window.removeEventListener("storage", h); }, [reload]);
   useEffect(() => {
     const handleEsc = (e: KeyboardEvent) => { if (e.key === "Escape") setSelectedShipment(null); };
@@ -251,20 +316,15 @@ export default function Dashboard({ sharedShipment, sharedRecipientName, sharedS
           </div>
 
           <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} transition={{ delay: 0.4 }} className="flex w-full md:w-auto items-center justify-center gap-3">
-            <button onClick={() => setShowNotif(!showNotif)} className="w-12 h-12 md:w-14 md:h-14 rounded-full bg-white/5 backdrop-blur-xl border border-white/10 flex items-center justify-center text-white hover:bg-white/10 hover:border-swiftly-orange transition-all relative group shadow-xl shrink-0">
-              <Bell size={20} className="group-hover:rotate-12 transition-transform" />
-              {unreadCount > 0 && (
-                <div className="absolute -top-1 -right-1 min-w-[20px] h-5 bg-swiftly-orange rounded-full border-2 border-swiftly-deep flex items-center justify-center px-1">
-                  <span className="text-[10px] font-bold text-white leading-none">{unreadCount > 9 ? "9+" : unreadCount}</span>
-                </div>
-              )}
-            </button>
-            {isSharedMode && (
-              <Link href="/tracking">
-                <button className="flex-1 md:flex-none px-6 py-3.5 md:px-8 md:py-4 rounded-full font-bold text-[14px] md:text-[16px] shadow-lg transition-all hover:-translate-y-1 active:translate-y-0 flex items-center justify-center gap-2 whitespace-nowrap bg-swiftly-orange text-white">
-                  <Search size={18} /> Track Another
-                </button>
-              </Link>
+            {!isSharedMode && (
+              <button onClick={() => setShowNotif(!showNotif)} className="w-12 h-12 md:w-14 md:h-14 rounded-full bg-white/5 backdrop-blur-xl border border-white/10 flex items-center justify-center text-white hover:bg-white/10 hover:border-swiftly-orange transition-all relative group shadow-xl shrink-0">
+                <Bell size={20} className="group-hover:rotate-12 transition-transform" />
+                {unreadCount > 0 && (
+                  <div className="absolute -top-1 -right-1 min-w-[20px] h-5 bg-swiftly-orange rounded-full border-2 border-swiftly-deep flex items-center justify-center px-1">
+                    <span className="text-[10px] font-bold text-white leading-none">{unreadCount > 9 ? "9+" : unreadCount}</span>
+                  </div>
+                )}
+              </button>
             )}
           </motion.div>
         </div>
@@ -279,8 +339,14 @@ export default function Dashboard({ sharedShipment, sharedRecipientName, sharedS
             { label: "Pending", val: shipments.filter(s => s.status === "Label Created").length, icon: Clock, color: "text-[#F59A25]", bg: "bg-white", border: "border-gray-100", trend: "Needs attention" },
             { label: "Delivered", val: shipments.filter(s => s.status === "Delivered").length, icon: MapPin, color: "text-blue-500", bg: "bg-white", border: "border-gray-100", trend: "Lifetime" },
             { label: "Exceptions", val: shipments.filter(s => s.status === "Exception").length, icon: AlertCircle, color: "text-red-500", bg: "bg-white", border: "border-gray-100", trend: "Action required" },
-            { label: "Unpaid Bills", val: unpaidBillsCount, icon: DollarSign, color: "text-amber-500", bg: "bg-white", border: "border-gray-100", trend: "Attention required", action: () => navigate("/billing") },
-          ].map((s, i) => (
+            { label: "Unpaid Bills", val: unpaidBillsCount, icon: DollarSign, color: "text-amber-500", bg: "bg-white", border: "border-gray-100", trend: "Attention required", action: () => {
+              if (isSharedMode) {
+                setCurrentView("billing");
+              } else {
+                navigate("/billing");
+              }
+            } },
+          ].filter(card => !(isSharedMode && card.label === "Unpaid Bills" && unpaidBillsCount === 0)).map((s, i) => (
             <motion.div key={i} variants={fadeUp} onClick={(s as any).action} className={`bg-white rounded-[32px] p-6 shadow-sm border border-gray-100 flex flex-col justify-between group hover:shadow-xl hover:-translate-y-1 transition-all duration-300 ${(s as any).action ? 'cursor-pointer' : ''}`}>
               <div className="flex justify-between items-start mb-6">
                 <div className={`w-12 h-12 rounded-2xl flex items-center justify-center bg-gray-50 border border-gray-100 shrink-0 group-hover:scale-110 transition-transform`}>
@@ -301,7 +367,7 @@ export default function Dashboard({ sharedShipment, sharedRecipientName, sharedS
         {/* ── MAIN CONTENT AREA ── */}
         <div className="flex flex-col lg:flex-row gap-8">
           
-          <div className="flex-1 space-y-8">
+          <div className="flex-1 min-w-0 space-y-8">
             
             {/* Premium Main / Billing View Switcher */}
             {currentView === "main" ? (
@@ -384,7 +450,7 @@ export default function Dashboard({ sharedShipment, sharedRecipientName, sharedS
               </>
             ) : (
               <motion.div initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} className="bg-white/90 backdrop-blur-md rounded-[32px] md:rounded-[40px] p-6 md:p-10 shadow-xl border border-white/80">
-                <div className="flex items-center justify-between mb-8 pb-6 border-b border-gray-100">
+                <div className="flex items-center justify-between mb-6 pb-6 border-b border-gray-100">
                   <div>
                     <h2 className="text-[28px] font-outfit font-bold text-swiftly-deep tracking-tight">Billing & Invoices</h2>
                     <p className="text-gray-400 text-sm">Review your shipping charges and payments.</p>
@@ -394,11 +460,27 @@ export default function Dashboard({ sharedShipment, sharedRecipientName, sharedS
                   </button>
                 </div>
 
+                {/* Balance card for shared mode */}
+                {isSharedMode && (
+                  <div className="bg-gray-50 rounded-2xl p-5 mb-6 border border-gray-100 flex flex-col sm:flex-row items-center justify-between gap-4">
+                    <div className="text-center sm:text-left">
+                      <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-1">Your Balance</p>
+                      <p className="text-[28px] font-outfit font-bold text-swiftly-deep leading-none">${sharedBalance.toFixed(2)}</p>
+                    </div>
+                    <button
+                      onClick={() => { setShowSharedDeposit(true); setSharedDepositStep(1); }}
+                      className="flex items-center gap-2 px-6 py-3 bg-[#F59A25] hover:bg-[#E08A1B] text-white rounded-full font-bold text-[13px] transition-all shadow-md hover:shadow-lg"
+                    >
+                      <Plus size={16} /> Add Funds
+                    </button>
+                  </div>
+                )}
+
                 <div className="space-y-4">
                   {(() => {
                     const filteredBills = isSharedMode 
-                      ? allBills.filter(b => b.title?.includes(sharedShipment!.trackingNumber || "") || b.note?.includes(sharedShipment!.trackingNumber || ""))
-                      : allBills;
+                      ? sharedBills.filter(b => b.title?.includes(sharedShipment!.trackingNumber || "") || b.note?.includes(sharedShipment!.trackingNumber || ""))
+                      : sharedBills;
 
                     if (filteredBills.length === 0) {
                       return (
@@ -413,30 +495,37 @@ export default function Dashboard({ sharedShipment, sharedRecipientName, sharedS
                     }
 
                     return filteredBills.map(bill => (
-                      <div key={bill.id} className="p-6 rounded-[24px] border border-gray-100 bg-gray-50/50 flex flex-col sm:flex-row items-center justify-between gap-4">
-                        <div className="flex items-center gap-4 w-full sm:w-auto">
+                      <div key={bill.id} className="p-6 rounded-[24px] border border-gray-100 bg-gray-50/50 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                        <div className="flex items-center gap-4 w-full sm:flex-1 min-w-0">
                           <div className="w-12 h-12 rounded-xl bg-blue-50 flex items-center justify-center shrink-0 border border-blue-100">
                             <DollarSign size={20} className="text-blue-500" />
                           </div>
-                          <div className="min-w-0">
+                          <div className="min-w-0 flex-1">
                             <p className="font-bold text-swiftly-deep text-[16px] truncate">{bill.title}</p>
-                            <p className="text-[12px] text-gray-400 font-medium">{new Date(bill.createdAt).toLocaleDateString()}</p>
+                            <p className="text-[12px] text-gray-400 font-medium truncate">{bill.note}</p>
+                            <p className="text-[10px] text-gray-400 font-medium mt-0.5">{new Date(bill.createdAt).toLocaleDateString()}</p>
                           </div>
                         </div>
-                        <div className="flex items-center gap-6 w-full sm:w-auto justify-between sm:justify-end">
-                          <div className="text-right">
+                        <div className="flex items-center gap-4 sm:gap-6 w-full sm:w-auto justify-between sm:justify-end shrink-0">
+                          <div className="text-left sm:text-right">
                             <p className="font-bold text-swiftly-deep text-[18px]">${bill.amount.toFixed(2)}</p>
                             <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${bill.status === "paid" ? "bg-green-50 text-green-600" : "bg-red-50 text-red-600"}`}>{bill.status}</span>
                           </div>
                           {!isSharedMode && (
                             <Link href="/billing">
-                              <button className="px-4 py-2 rounded-lg bg-swiftly-deep text-white text-xs font-bold hover:bg-swiftly-forest transition-all">Pay Now</button>
+                              <button className="px-4 py-2 rounded-lg bg-swiftly-deep text-white text-xs font-bold hover:bg-swiftly-forest transition-all whitespace-nowrap">Pay Now</button>
                             </Link>
                           )}
                           {isSharedMode && bill.status === "unpaid" && (
-                            <div className="px-4 py-2 rounded-lg bg-swiftly-orange/10 text-swiftly-orange text-[10px] font-bold border border-swiftly-orange/20">
-                              Contact Sender to Pay
-                            </div>
+                            <button
+                              onClick={() => { setSharedPayBill(bill); setSharedPayStep("confirm"); }}
+                              className="px-4 py-2 rounded-lg bg-swiftly-deep text-white text-xs font-bold hover:bg-swiftly-forest transition-all flex items-center gap-1 whitespace-nowrap shadow-md"
+                            >
+                              <CreditCard size={14} /> Pay Now
+                            </button>
+                          )}
+                          {isSharedMode && bill.status === "paid" && (
+                            <span className="px-3 py-1.5 rounded-lg bg-green-50 text-green-600 text-[10px] font-bold border border-green-100 whitespace-nowrap">Paid</span>
                           )}
                         </div>
                       </div>
@@ -448,42 +537,93 @@ export default function Dashboard({ sharedShipment, sharedRecipientName, sharedS
           </div>
 
           {/* ── PREMIUM SIDEBAR ── */}
-          <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.7 }} className="lg:w-[360px] flex flex-col gap-6">
+          <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.7 }} className="lg:w-[360px] shrink-0 flex flex-col gap-6">
             
             {/* Quick Actions Bento */}
-            <div className="bg-white rounded-[32px] p-8 shadow-sm border border-gray-100">
-              <h3 className="text-[13px] font-bold uppercase tracking-widest text-gray-400 mb-6 flex items-center gap-2">
-                <Settings size={16} className="text-[#F59A25]" /> Dashboard Actions
-              </h3>
-              <div className="grid grid-cols-2 gap-4">
-                {[
-                  { label: "Overview", icon: Package, action: () => setCurrentView("main"), active: currentView === "main", color: "text-[#0B2B26]", bg: "bg-gray-50" },
-                  { label: "Billing", icon: CreditCard, link: "/billing", color: "text-blue-500", bg: "bg-blue-50" },
-                  { label: "Help Center", icon: HelpCircle, link: "/support/help-center", color: "text-[#F59A25]", bg: "bg-orange-50" },
-                  { label: "Find Us", icon: MapPin, link: "/support/help-center", color: "text-purple-500", bg: "bg-purple-50" },
-                ].map((a, i) => (
-                  <div key={i} onClick={a.action ? a.action : undefined} className="h-full">
-                    {a.link ? (
-                      <Link href={a.link}>
-                        <div className="rounded-[24px] p-5 flex flex-col items-center justify-center gap-3 transition-all cursor-pointer group bg-gray-50 hover:bg-white border border-transparent hover:border-gray-200 hover:shadow-lg h-full">
+            {!isSharedMode ? (
+              <div className="bg-white rounded-[32px] p-8 shadow-sm border border-gray-100">
+                <h3 className="text-[13px] font-bold uppercase tracking-widest text-gray-400 mb-6 flex items-center gap-2">
+                  <Settings size={16} className="text-[#F59A25]" /> Dashboard Actions
+                </h3>
+                <div className="grid grid-cols-2 gap-4">
+                  {[
+                    { label: "Overview", icon: Package, action: () => setCurrentView("main"), active: currentView === "main", color: "text-[#0B2B26]", bg: "bg-gray-50" },
+                    { label: "Billing", icon: CreditCard, link: "/billing", color: "text-blue-500", bg: "bg-blue-50" },
+                    { label: "Help Center", icon: HelpCircle, link: "/support/help-center", color: "text-[#F59A25]", bg: "bg-orange-50" },
+                    { label: "Find Us", icon: MapPin, link: "/support/help-center", color: "text-purple-500", bg: "bg-purple-50" },
+                  ].map((a, i) => (
+                    <div key={i} onClick={a.action ? a.action : undefined} className="h-full">
+                      {a.link ? (
+                        <Link href={a.link}>
+                          <div className="rounded-[24px] p-5 flex flex-col items-center justify-center gap-3 transition-all cursor-pointer group bg-gray-50 hover:bg-white border border-transparent hover:border-gray-200 hover:shadow-lg h-full">
+                            <div className={`w-12 h-12 rounded-2xl flex items-center justify-center transition-transform group-hover:scale-110 ${a.bg}`}>
+                              <a.icon size={20} className={a.color} />
+                            </div>
+                            <p className="text-[12px] font-bold text-[#0B2B26] text-center">{a.label}</p>
+                          </div>
+                        </Link>
+                      ) : (
+                        <div className={`rounded-[24px] p-5 flex flex-col items-center justify-center gap-3 transition-all cursor-pointer group border ${a.active ? "bg-white border-[#F59A25] shadow-lg" : "bg-gray-50 border-transparent hover:bg-white hover:border-gray-200 hover:shadow-lg"} h-full`}>
                           <div className={`w-12 h-12 rounded-2xl flex items-center justify-center transition-transform group-hover:scale-110 ${a.bg}`}>
                             <a.icon size={20} className={a.color} />
                           </div>
                           <p className="text-[12px] font-bold text-[#0B2B26] text-center">{a.label}</p>
                         </div>
-                      </Link>
-                    ) : (
-                      <div className={`rounded-[24px] p-5 flex flex-col items-center justify-center gap-3 transition-all cursor-pointer group border ${a.active ? "bg-white border-[#F59A25] shadow-lg" : "bg-gray-50 border-transparent hover:bg-white hover:border-gray-200 hover:shadow-lg"} h-full`}>
-                        <div className={`w-12 h-12 rounded-2xl flex items-center justify-center transition-transform group-hover:scale-110 ${a.bg}`}>
-                          <a.icon size={20} className={a.color} />
-                        </div>
-                        <p className="text-[12px] font-bold text-[#0B2B26] text-center">{a.label}</p>
-                      </div>
-                    )}
-                  </div>
-                ))}
+                      )}
+                    </div>
+                  ))}
+                </div>
               </div>
-            </div>
+            ) : (
+              <div className="bg-white rounded-[32px] p-8 shadow-sm border border-gray-100 flex flex-col h-full max-h-[600px]">
+                <div className="flex items-center justify-between mb-6">
+                  <h3 className="text-[18px] font-bold text-[#0B2B26] flex items-center gap-2">
+                    <Bell size={18} className="text-[#F59A25]" /> Notifications
+                  </h3>
+                  {unreadCount > 0 && (
+                    <span className="bg-swiftly-orange text-white text-[10px] font-bold px-2 py-0.5 rounded-full">{unreadCount} New</span>
+                  )}
+                </div>
+                
+                <div className="flex-1 overflow-y-auto pr-2" style={{ scrollbarWidth: 'none' }}>
+                  {notifications.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center h-full py-10 text-center">
+                      <div className="w-12 h-12 bg-gray-50 rounded-xl flex items-center justify-center mb-3">
+                        <Bell size={20} className="text-gray-300" />
+                      </div>
+                      <p className="font-bold text-gray-400 text-sm">No updates</p>
+                      <p className="text-gray-300 text-xs mt-1">Check back later</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {notifications.map(notif => {
+                        const icons: Record<string, { icon: React.ReactNode; bg: string }> = {
+                          bill_created: { icon: <FileText size={14} className="text-blue-500" />, bg: "bg-blue-50" },
+                          deposit_approved: { icon: <CheckCircle2 size={14} className="text-green-500" />, bg: "bg-green-50" },
+                          deposit_rejected: { icon: <AlertCircle size={14} className="text-red-500" />, bg: "bg-red-50" },
+                          bill_paid: { icon: <DollarSign size={14} className="text-swiftly-orange" />, bg: "bg-swiftly-cream" },
+                        };
+                        const cfg = icons[notif.type] || icons.bill_created;
+                        return (
+                          <div key={notif.id} className={`flex items-start gap-3 p-3 rounded-xl border border-gray-100 ${!notif.read ? "bg-blue-50/20 border-blue-100/50" : "bg-white"}`}>
+                            <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${cfg.bg}`}>
+                              {cfg.icon}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="font-bold text-xs text-[#0B2B26] leading-snug break-words">{notif.title}</p>
+                              <p className="text-[11px] text-gray-500 mt-0.5 leading-relaxed truncate">{notif.body}</p>
+                              <p className="text-[9px] text-gray-400 mt-1">
+                                {new Date(notif.createdAt).toLocaleDateString()}
+                              </p>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
 
 
 
@@ -603,8 +743,16 @@ export default function Dashboard({ sharedShipment, sharedRecipientName, sharedS
                     <button
                       onClick={async () => {
                         if (!user) return;
-                        const url = buildShareUrl(await createShareLink(selectedShipment.id, user.email, selectedShipment.to?.name || selectedShipment.receiver_name));
-                        setShareModal({ shipment: selectedShipment, url });
+                        try {
+                          const recipientName = selectedShipment.to?.name || selectedShipment.receiver_name || "Recipient";
+                          const token = await createShareLink(selectedShipment.id, user.email, recipientName);
+                          const url = buildShareUrl(token, selectedShipment, user.email, recipientName);
+                          const existingShares = await getSharesForShipment(selectedShipment.id);
+                          setShareLinks(existingShares);
+                          setShareModal({ shipment: selectedShipment, url });
+                        } catch (err) {
+                          console.error('Failed to create share link:', err);
+                        }
                       }}
                       className="w-full py-3.5 rounded-[18px] font-bold text-[14px] border-2 border-swiftly-orange/30 text-swiftly-orange bg-swiftly-orange/5 hover:bg-swiftly-orange/10 transition-all flex items-center justify-center gap-2"
                     >
@@ -635,7 +783,10 @@ export default function Dashboard({ sharedShipment, sharedRecipientName, sharedS
                 )}
                 {isSharedMode && (
                   <button
-                    onClick={() => navigate(`/tracking?tn=${selectedShipment.trackingNumber}`)}
+                    onClick={() => {
+                      const tokenStr = window.location.pathname.startsWith('/shared/') ? window.location.pathname.split('/shared/')[1] : '';
+                      navigate(`/tracking?tn=${selectedShipment.trackingNumber}${tokenStr ? `&fromShared=${tokenStr}` : ''}`);
+                    }}
                     className="w-full py-4 rounded-[18px] font-bold text-[14px] text-white shadow-lg shadow-swiftly-orange/30 transition-all flex items-center justify-center gap-2 hover:-translate-y-0.5 active:translate-y-0 bg-swiftly-orange hover:bg-swiftly-amber"
                   >
                     Track Full <ChevronRight size={16} />
@@ -810,13 +961,10 @@ export default function Dashboard({ sharedShipment, sharedRecipientName, sharedS
                 </div>
 
                 {/* Active shares for this shipment */}
-                {(() => {
-                  const existingShares = getSharesForShipment(shareModal.shipment.id);
-                  if (existingShares.length === 0) return null;
-                  return (
+                {shareLinks.length > 0 && (
                     <div>
-                      <p className="text-xs font-bold uppercase tracking-widest text-gray-500 mb-2">Active Share Links ({existingShares.length})</p>
-                      {existingShares.map(share => (
+                      <p className="text-xs font-bold uppercase tracking-widest text-gray-500 mb-2">Active Share Links ({shareLinks.length})</p>
+                      {shareLinks.map((share: any) => (
                         <div key={share.token} className="flex items-center justify-between gap-3 py-2.5 border-b border-gray-100 last:border-0">
                           <div className="flex-1 min-w-0">
                             <p className="text-xs font-mono text-gray-500 truncate">...{share.token.slice(-8)}</p>
@@ -825,8 +973,11 @@ export default function Dashboard({ sharedShipment, sharedRecipientName, sharedS
                           <button
                             onClick={async () => {
                               await revokeShareLink(share.token);
-                              const newUrl = buildShareUrl(await createShareLink(shareModal.shipment.id, user!.email));
+                              const newToken = await createShareLink(shareModal.shipment.id, user!.email);
+                              const newUrl = buildShareUrl(newToken, shareModal.shipment, user!.email);
                               setShareModal(prev => prev ? { ...prev, url: newUrl } : null);
+                              const updatedShares = await getSharesForShipment(shareModal.shipment.id);
+                              setShareLinks(updatedShares);
                               showToast("Share link revoked.");
                             }}
                             className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-red-200 text-red-500 text-xs font-bold hover:bg-red-50 transition-colors"
@@ -836,8 +987,7 @@ export default function Dashboard({ sharedShipment, sharedRecipientName, sharedS
                         </div>
                       ))}
                     </div>
-                  );
-                })()}
+                )}
 
                 {/* Share Actions */}
                 <div className="grid grid-cols-2 gap-3 pt-2">
@@ -867,6 +1017,197 @@ export default function Dashboard({ sharedShipment, sharedRecipientName, sharedS
       <style>{`
         .hide-scrollbar::-webkit-scrollbar { display: none; }
       `}</style>
+
+      {/* ── SHARED MODE: DEPOSIT MODAL ── */}
+      {isSharedMode && showSharedDeposit && (() => {
+        const recvEmail = sharedShipment!.receiver_email || "";
+        const walletAddr = sharedDepositMethod === "bitcoin" ? sharedWallets.bitcoin : sharedWallets.usdt;
+        const qrUrl = "https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=" + encodeURIComponent(walletAddr);
+        const resetSharedDep = () => { setSharedDepositStep(1); setSharedDepositAmount(""); setSharedReceiptFile(null); setSharedReceiptName(""); setSharedCopied(false); setShowSharedDeposit(false); };
+        return (
+          <div className="fixed inset-0 z-[500] bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
+            <div className="bg-white w-full sm:max-w-md rounded-t-3xl sm:rounded-2xl overflow-hidden shadow-2xl max-h-[95vh] overflow-y-auto">
+              <div className="flex items-center justify-between px-6 py-5 border-b border-gray-100">
+                {sharedDepositStep > 1 && sharedDepositStep < 4 ? (
+                  <button onClick={() => setSharedDepositStep((sharedDepositStep - 1) as any)} className="w-9 h-9 flex items-center justify-center rounded-xl hover:bg-gray-100"><ArrowLeft size={18} className="text-gray-600" /></button>
+                ) : <div className="w-9" />}
+                <div className="flex gap-1.5">{[1,2,3].map(s => <div key={s} className={`h-1.5 rounded-full transition-all ${s <= Math.min(sharedDepositStep, 3) ? "bg-[#F59A25] w-6" : "bg-gray-200 w-4"}`} />)}</div>
+                {sharedDepositStep < 4 ? <button onClick={resetSharedDep} className="w-9 h-9 flex items-center justify-center rounded-xl hover:bg-gray-100"><X size={18} className="text-gray-600" /></button> : <div className="w-9" />}
+              </div>
+
+              {sharedDepositStep === 1 && (
+                <div className="p-6">
+                  <h2 className="text-xl font-outfit font-bold text-[#0B2B26] mb-1">Deposit Funds</h2>
+                  <p className="text-sm text-gray-500 mb-6">Enter how much you want to deposit.</p>
+                  <div className="mb-6">
+                    <label className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2 block">Amount (USD)</label>
+                    <div className="relative">
+                      <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 font-bold text-lg">$</span>
+                      <input type="number" min="1" placeholder="0.00" value={sharedDepositAmount} onChange={e => setSharedDepositAmount(e.target.value)} className="w-full pl-9 pr-4 py-4 border-2 border-gray-200 rounded-xl text-lg font-bold text-[#0B2B26] outline-none focus:border-[#F59A25] transition-colors" />
+                    </div>
+                  </div>
+                  <button disabled={!sharedDepositAmount || parseFloat(sharedDepositAmount) <= 0} onClick={() => setSharedDepositStep(2)} className="w-full py-4 rounded-xl font-bold text-white text-sm transition-colors disabled:opacity-40 disabled:cursor-not-allowed bg-[#F59A25]">Continue</button>
+                </div>
+              )}
+
+              {sharedDepositStep === 2 && (
+                <div className="p-6">
+                  <h2 className="text-xl font-outfit font-bold text-[#0B2B26] mb-1">Payment Method</h2>
+                  <p className="text-sm text-gray-500 mb-6">Choose how to send <span className="font-bold text-[#0B2B26]">${parseFloat(sharedDepositAmount || "0").toFixed(2)}</span></p>
+                  <div className="space-y-3 mb-6">
+                    {([{ id: "bitcoin" as const, label: "Bitcoin", sub: "BTC network", color: "text-orange-500", bg: "bg-orange-50" }, { id: "usdt" as const, label: "USDT (TRC-20)", sub: "Tron network", color: "text-green-600", bg: "bg-green-50" }]).map(m => (
+                      <button key={m.id} onClick={() => setSharedDepositMethod(m.id)} className={`w-full flex items-center gap-4 p-4 rounded-xl border-2 text-left transition-all ${sharedDepositMethod === m.id ? "border-[#0B2B26] bg-[#0B2B26]/3" : "border-gray-200 hover:border-gray-300"}`}>
+                        <div className={`w-11 h-11 rounded-xl flex items-center justify-center ${m.bg} shrink-0`}>{m.id === "bitcoin" ? <Bitcoin size={20} className={m.color} /> : <DollarSign size={20} className={m.color} />}</div>
+                        <div className="flex-1"><p className="font-bold text-[#0B2B26] text-sm">{m.label}</p><p className="text-xs text-gray-500">{m.sub}</p></div>
+                        <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 ${sharedDepositMethod === m.id ? "border-[#0B2B26] bg-[#0B2B26]" : "border-gray-300"}`}>{sharedDepositMethod === m.id && <div className="w-2 h-2 rounded-full bg-white" />}</div>
+                      </button>
+                    ))}
+                  </div>
+                  <button onClick={() => setSharedDepositStep(3)} className="w-full py-4 rounded-xl font-bold text-white text-sm bg-[#F59A25]">Continue</button>
+                </div>
+              )}
+
+              {sharedDepositStep === 3 && (
+                <div className="p-6">
+                  <h2 className="text-xl font-outfit font-bold text-[#0B2B26] mb-1">Send Payment</h2>
+                  <p className="text-sm text-gray-500 mb-5">Send exactly <span className="font-bold text-[#0B2B26]">${parseFloat(sharedDepositAmount || "0").toFixed(2)}</span> of <span className="font-bold">{sharedDepositMethod === "bitcoin" ? "BTC" : "USDT (TRC-20)"}</span></p>
+                  <div className="flex justify-center mb-4"><div className="bg-white border-2 border-gray-100 rounded-xl p-3 shadow-sm"><img src={qrUrl} alt="QR" className="w-44 h-44 rounded-lg" /></div></div>
+                  <div className="bg-gray-50 rounded-xl p-3 flex items-center gap-2 mb-4">
+                    <p className="flex-1 text-xs font-mono text-gray-700 break-all leading-relaxed">{walletAddr}</p>
+                    <button onClick={() => { navigator.clipboard.writeText(walletAddr).catch(() => {}); setSharedCopied(true); setTimeout(() => setSharedCopied(false), 2000); }} className="shrink-0 w-8 h-8 rounded-lg flex items-center justify-center bg-white border border-gray-200 hover:bg-gray-100">
+                      {sharedCopied ? <Check size={14} className="text-green-500" /> : <Copy size={14} className="text-gray-500" />}
+                    </button>
+                  </div>
+                  <div className="mb-5">
+                    <label className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2 block">Upload Receipt</label>
+                    <label className={`flex items-center gap-3 p-4 rounded-xl border-2 border-dashed cursor-pointer ${sharedReceiptFile ? "border-green-300 bg-green-50" : "border-gray-200 hover:border-gray-300 bg-gray-50"}`}>
+                      <input type="file" accept="image/*,application/pdf" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (!f) return; setSharedReceiptName(f.name); const r = new FileReader(); r.onload = ev => setSharedReceiptFile(ev.target?.result as string); r.readAsDataURL(f); }} />
+                      {sharedReceiptFile ? <><Check size={18} className="text-green-500 shrink-0" /><p className="text-sm font-medium text-green-700 truncate">{sharedReceiptName}</p></> : <><Upload size={18} className="text-gray-400 shrink-0" /><p className="text-sm text-gray-500">Tap to upload receipt</p></>}
+                    </label>
+                  </div>
+                  <button disabled={!sharedReceiptFile} onClick={async () => {
+                    const dep: Deposit = { id: generateId("dep"), userEmail: recvEmail, amount: parseFloat(sharedDepositAmount), method: sharedDepositMethod, receiptImage: sharedReceiptFile ?? undefined, status: "pending", createdAt: new Date().toISOString() };
+                    await saveDeposit(dep);
+                    setSharedDepositStep(4);
+                    setTimeout(() => { setSharedDepositStep(5); reload(); }, 5000);
+                  }} className="w-full py-4 rounded-xl font-bold text-white text-sm bg-[#0B2B26] disabled:opacity-40 disabled:cursor-not-allowed">I've Sent It</button>
+                </div>
+              )}
+
+              {sharedDepositStep === 4 && (
+                <div className="p-10 text-center">
+                  <div className="w-16 h-16 rounded-full bg-[#F59A25]/10 flex items-center justify-center mx-auto mb-6"><Loader2 size={28} className="text-[#F59A25] animate-spin" /></div>
+                  <h2 className="text-xl font-outfit font-bold text-[#0B2B26] mb-2">Processing...</h2>
+                  <p className="text-sm text-gray-500">Submitting your deposit request</p>
+                </div>
+              )}
+
+              {sharedDepositStep === 5 && (
+                <div className="p-8 text-center">
+                  <div className="w-16 h-16 rounded-full bg-amber-50 border-2 border-amber-100 flex items-center justify-center mx-auto mb-5"><Clock size={28} className="text-amber-500" /></div>
+                  <h2 className="text-xl font-outfit font-bold text-[#0B2B26] mb-2">Deposit Submitted!</h2>
+                  <p className="text-sm text-gray-600 mb-1">Your deposit is being reviewed.</p>
+                  <p className="text-sm font-bold text-amber-600 mb-6">This typically takes 5 to 30 minutes.</p>
+                  <button onClick={resetSharedDep} className="w-full py-4 rounded-xl font-bold text-white text-sm bg-[#0B2B26]">Done</button>
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── SHARED MODE: PAYMENT MODAL ── */}
+      {isSharedMode && sharedPayBill && sharedPayStep && (() => {
+        const recvEmail = sharedShipment!.receiver_email || "";
+        const closeSharedPay = () => { setSharedPayStep(null); setSharedPayBill(null); };
+        return (
+          <div className="fixed inset-0 z-[500] bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
+            <div className="bg-white w-full sm:max-w-md rounded-t-3xl sm:rounded-2xl overflow-hidden shadow-2xl max-h-[95vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+
+              {sharedPayStep === "confirm" && (
+                <div className="p-6">
+                  <div className="flex items-center justify-between mb-6">
+                    <h2 className="text-xl font-outfit font-bold text-[#0B2B26]">Confirm Payment</h2>
+                    <button onClick={closeSharedPay} className="w-9 h-9 flex items-center justify-center rounded-xl hover:bg-gray-100"><X size={18} className="text-gray-400" /></button>
+                  </div>
+                  <div className="bg-gray-50 rounded-2xl p-5 mb-5 border border-gray-100">
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-1">Invoice</p>
+                    <p className="text-[16px] font-bold text-[#0B2B26] mb-3">{sharedPayBill.title}</p>
+                    <div className="h-px bg-gray-200 my-3" />
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm text-gray-500 font-medium">Amount Due</p>
+                      <p className="text-[22px] font-outfit font-bold text-[#F59A25]">${sharedPayBill.amount.toFixed(2)}</p>
+                    </div>
+                  </div>
+                  <div className="bg-[#0B2B26] rounded-2xl p-5 mb-5 text-white">
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-white/50 mb-1">Paying From</p>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-xl bg-white/10 flex items-center justify-center"><Wallet size={20} className="text-[#F59A25]" /></div>
+                        <div><p className="font-bold text-[15px]">Your Balance</p><p className="text-[12px] text-white/60">Available funds</p></div>
+                      </div>
+                      <p className="text-[20px] font-outfit font-bold">${sharedBalance.toFixed(2)}</p>
+                    </div>
+                  </div>
+                  {sharedBalance < sharedPayBill.amount && (
+                    <div className="bg-red-50 border border-red-200 rounded-xl p-4 mb-5 flex items-start gap-3">
+                      <AlertTriangle size={16} className="text-red-500 shrink-0 mt-0.5" />
+                      <div><p className="text-sm font-bold text-red-700 mb-1">Insufficient Balance</p><p className="text-xs text-red-600">You need ${(sharedPayBill.amount - sharedBalance).toFixed(2)} more.</p></div>
+                    </div>
+                  )}
+                  {sharedBalance >= sharedPayBill.amount ? (
+                    <button onClick={async () => {
+                      setSharedPayStep("loading");
+                      const newBal = sharedBalance - sharedPayBill.amount;
+                      await setUserBalance(recvEmail, newBal);
+                      await saveBill({ ...sharedPayBill, status: "paid", paidAt: new Date().toISOString() });
+                      
+                      // Notify that the bill has been paid
+                      await saveNotification({
+                        id: generateId("notif"),
+                        userEmail: sharedSenderEmail || recvEmail,
+                        type: "bill_paid",
+                        title: "Invoice Paid",
+                        body: `Invoice for $${sharedPayBill.amount.toFixed(2)} (${sharedPayBill.title}) was paid successfully.`,
+                        read: false,
+                        createdAt: new Date().toISOString()
+                      });
+
+                      const target = sharedPayBill.receiverEmail || recvEmail;
+                      sendBillPaidEmail(target, sharedPayBill);
+                      setTimeout(async () => { setSharedPayStep("success"); await reload(); }, 5000);
+                    }} className="w-full py-4 rounded-xl font-bold text-white text-[15px] bg-[#F59A25] hover:bg-[#E08A1B] transition-all shadow-lg flex items-center justify-center gap-2">
+                      Confirm Payment of ${sharedPayBill.amount.toFixed(2)} <ChevronRight size={16} />
+                    </button>
+                  ) : (
+                    <button onClick={() => { closeSharedPay(); setShowSharedDeposit(true); setSharedDepositStep(1); }} className="w-full py-4 rounded-xl font-bold text-white text-[15px] bg-[#0B2B26] flex items-center justify-center gap-2">
+                      <Plus size={16} /> Deposit Funds
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {sharedPayStep === "loading" && (
+                <div className="p-10 text-center">
+                  <div className="w-20 h-20 rounded-full bg-[#F59A25]/10 flex items-center justify-center mx-auto mb-6"><Loader2 size={36} className="text-[#F59A25] animate-spin" /></div>
+                  <h2 className="text-xl font-outfit font-bold text-[#0B2B26] mb-2">Processing Payment...</h2>
+                  <p className="text-sm text-gray-500">Deducting ${sharedPayBill.amount.toFixed(2)} from your balance</p>
+                </div>
+              )}
+
+              {sharedPayStep === "success" && (
+                <div className="p-8 text-center">
+                  <div className="w-20 h-20 rounded-full bg-green-50 border-2 border-green-100 flex items-center justify-center mx-auto mb-6"><CheckCircle2 size={36} className="text-green-500" /></div>
+                  <h2 className="text-xl font-outfit font-bold text-[#0B2B26] mb-2">Payment Successful!</h2>
+                  <p className="text-sm text-gray-600 mb-1">Invoice "{sharedPayBill.title}" has been paid.</p>
+                  <p className="text-sm text-green-600 font-bold mb-6">You will receive a confirmation email shortly.</p>
+                  <button onClick={closeSharedPay} className="w-full py-4 rounded-xl font-bold text-white text-sm bg-[#0B2B26]">Done</button>
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }

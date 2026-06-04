@@ -19,7 +19,7 @@ import { sendBillPaidEmail } from "@/lib/emailService";
 type DepositStep = 1 | 2 | 3 | 4 | 5;
 
 export default function Billing() {
-  const { user, isAuthenticated } = useAuth();
+  const { user, isAuthenticated, loading } = useAuth();
   const [, navigate] = useLocation();
 
   // ── Data ──
@@ -41,6 +41,9 @@ export default function Billing() {
   // ── Tab & Bill View ──
   const [tab, setTab] = useState<"bills" | "deposits">("bills");
   const [selectedBill, setSelectedBill] = useState<Bill | null>(null);
+  const [successMsg, setSuccessMsg] = useState("");
+  // Payment flow: "confirm" → "loading" → "success"
+  const [payStep, setPayStep] = useState<"confirm" | "loading" | "success" | null>(null);
 
   const reload = useCallback(async () => {
     if (!user) return;
@@ -50,36 +53,48 @@ export default function Billing() {
     setWalletAddresses(await getWalletAddresses());
   }, [user]);
 
-  useEffect(() => { if (!isAuthenticated) navigate("/auth/login"); }, [isAuthenticated]);
+  useEffect(() => {
+    if (!loading && !isAuthenticated) navigate("/auth/login");
+  }, [isAuthenticated, loading]);
   useEffect(() => { reload(); }, [reload]);
 
   if (!isAuthenticated || !user) return null;
 
-  // ── Pay bill from balance ──
-  const payBill = async (bill: Bill) => {
-    setSelectedBill(null); // Close modal if open
-    if (balance < bill.amount) {
+  // ── Open the payment confirmation modal ──
+  const openPayModal = (bill: Bill) => {
+    setSelectedBill(bill);
+    setPayStep("confirm");
+  };
+
+  // ── Execute the actual payment ──
+  const confirmPayBill = async () => {
+    if (!selectedBill) return;
+    if (balance < selectedBill.amount) {
+      setPayStep(null);
+      setSelectedBill(null);
       setShowDeposit(true);
       return;
     }
-    const newBal = balance - bill.amount;
+    setPayStep("loading");
+    // Deduct balance
+    const newBal = balance - selectedBill.amount;
     await setUserBalance(user.email, newBal);
-    await saveBill({ ...bill, status: "paid", paidAt: new Date().toISOString() });
-    await saveNotification({
-      id: generateId("notif"),
-      userEmail: user.email,
-      type: "bill_paid",
-      title: "Bill Payment Confirmed",
-      body: `Your bill of $${bill.amount.toFixed(2)} has been paid successfully.`,
-      read: false,
-      createdAt: new Date().toISOString(),
-    });
+    await saveBill({ ...selectedBill, status: "paid", paidAt: new Date().toISOString() });
     
-    // Send email to user
-    await sendBillPaidEmail(user.email, bill.title, bill.amount);
+    // Send email to the receiver
+    const receiverTarget = selectedBill.receiverEmail || selectedBill.userEmail;
+    sendBillPaidEmail(receiverTarget, selectedBill);
     
-    // Reload UI
-    reload();
+    // Wait 5 seconds for the loading animation
+    setTimeout(async () => {
+      setPayStep("success");
+      await reload();
+    }, 5000);
+  };
+
+  const closePayModal = () => {
+    setPayStep(null);
+    setSelectedBill(null);
   };
 
   // ── Deposit step helpers ──
@@ -164,7 +179,7 @@ export default function Billing() {
       <div className="max-w-5xl mx-auto px-4 mt-8 md:mt-12 relative z-20">
 
         {/* ── MINIMAL TABS ── */}
-        <div className="flex bg-gray-100/50 p-1 rounded-2xl border border-gray-200/50 backdrop-blur-sm self-start mb-8">
+        <div className="flex bg-gray-100/50 p-1 rounded-2xl border border-gray-200/50 backdrop-blur-sm self-start mb-4">
           {(["bills", "deposits"] as const).map(t => (
             <button
               key={t}
@@ -175,6 +190,12 @@ export default function Billing() {
             </button>
           ))}
         </div>
+
+        {successMsg && (
+          <div className="mb-6 p-4 rounded-2xl bg-green-50 border border-green-200 text-green-700 font-bold text-[14px] flex items-center gap-3 animate-in fade-in slide-in-from-top-2 duration-300">
+            <CheckCircle2 size={18} /> {successMsg}
+          </div>
+        )}
 
         {/* ── TAB CONTENT ── */}
         <AnimatePresence mode="wait">
@@ -208,24 +229,67 @@ export default function Billing() {
                             </div>
                           </div>
                           {bill.note && <p className="text-[13px] text-gray-600 mb-4 bg-gray-50 p-3 rounded-xl border border-gray-100">{bill.note}</p>}
+
+                          {bill.imageUrl && (
+                            <div className="mb-4 rounded-xl overflow-hidden relative group max-h-48 border border-gray-100 bg-gray-50 flex items-center justify-center">
+                              <img src={bill.imageUrl} alt="Bill Document" className="w-full h-full object-contain mix-blend-multiply" />
+                              <a
+                                href={bill.imageUrl}
+                                download={bill.imageFileName || "bill-receipt.png"}
+                                className="absolute bottom-3 right-3 bg-white/90 backdrop-blur-sm px-3 py-2 rounded-lg text-swiftly-deep hover:text-swiftly-orange shadow-md opacity-0 group-hover:opacity-100 transition-all flex items-center gap-1 text-[11px] font-bold z-10"
+                              >
+                                <Download size={14} /> Download
+                              </a>
+                            </div>
+                          )}
                           
                           <div className="flex items-center gap-3">
                             <button
-                              onClick={() => setSelectedBill(bill)}
+                              onClick={() => openPayModal(bill)}
                               className="flex-1 bg-[#0B2B26] text-white py-3 rounded-xl font-bold text-[13px] hover:bg-[#123d36] transition-all flex items-center justify-center gap-2"
                             >
                               <CreditCard size={16} /> Pay Invoice
                             </button>
-                            {bill.imageUrl && (
-                              <button
-                                onClick={() => window.open(bill.imageUrl, "_blank")}
-                                className="flex items-center justify-center w-12 h-12 bg-white border border-gray-200 rounded-xl text-gray-600 hover:bg-gray-50 hover:text-[#F59A25] transition-colors"
-                                title="View Document"
-                              >
-                                <ExternalLink size={18} />
-                              </button>
-                            )}
                           </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* ── PAID BILLS ── */}
+                {paidBills.length > 0 && (
+                  <div className="mt-8">
+                    <h3 className="text-[13px] font-bold text-gray-400 uppercase tracking-wider mb-4 px-1">Payment History</h3>
+                    <div className="grid gap-4">
+                      {paidBills.map(bill => (
+                        <div key={bill.id} className="bg-white rounded-2xl border border-gray-100 p-5 hover:shadow-xl transition-all duration-300 opacity-70 hover:opacity-100">
+                          <div className="flex items-start justify-between">
+                            <div>
+                              <p className="text-[14px] font-bold text-[#0B2B26] mb-1 line-through decoration-gray-300">{bill.title}</p>
+                              <p className="text-[12px] text-gray-500">Invoice: #{bill.id.split("-")[1]?.toUpperCase() || bill.id}</p>
+                              <p className="text-[12px] text-gray-500">Paid on {bill.paidAt ? new Date(bill.paidAt).toLocaleDateString() : new Date(bill.createdAt).toLocaleDateString()}</p>
+                            </div>
+                            <div className="text-right">
+                              <p className="text-[20px] font-bold font-outfit text-gray-400">${bill.amount.toFixed(2)}</p>
+                              <span className="inline-flex items-center gap-1 text-[11px] font-bold uppercase tracking-wider text-green-600 bg-green-50 px-2.5 py-1 rounded-full mt-2 border border-green-100">
+                                <CheckCircle2 size={12} /> Paid
+                              </span>
+                            </div>
+                          </div>
+                          
+                          {bill.imageUrl && (
+                            <div className="mt-4 pt-4 border-t border-gray-100 flex items-center justify-between">
+                              <span className="text-[12px] text-gray-500 flex items-center gap-1.5"><FileText size={14} /> Receipt attached</span>
+                              <a
+                                href={bill.imageUrl}
+                                download={bill.imageFileName || "bill-receipt.png"}
+                                className="text-[12px] font-bold text-[#0B2B26] hover:text-[#F59A25] transition-colors flex items-center gap-1 bg-gray-50 px-3 py-1.5 rounded-lg border border-gray-100"
+                              >
+                                <Download size={14} /> Download
+                              </a>
+                            </div>
+                          )}
                         </div>
                       ))}
                     </div>
@@ -467,92 +531,123 @@ export default function Billing() {
         </div>
       )}
 
-      {/* ── BILL DETAIL MODAL ── */}
-      {selectedBill && (
-        <div className="fixed inset-0 z-[500] bg-black/50 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={() => setSelectedBill(null)}>
-          <div className="bg-white w-full sm:max-w-lg rounded-t-2xl sm:rounded-2xl overflow-hidden shadow-2xl max-h-[92vh] flex flex-col" onClick={e => e.stopPropagation()}>
-            
-            {/* Header */}
-            <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 shrink-0">
-              <div className="flex items-center gap-3 min-w-0">
-                <div className="w-9 h-9 rounded-lg bg-[#0B2B26] flex items-center justify-center shrink-0">
-                  <img src={`${import.meta.env.BASE_URL}swiftly_logo-removebg-preview.png`} alt="S" className="h-4 w-auto brightness-0 invert" />
+      {/* ── PAYMENT FLOW MODAL ── */}
+      {selectedBill && payStep && (
+        <div className="fixed inset-0 z-[500] bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
+          <div className="bg-white w-full sm:max-w-md rounded-t-3xl sm:rounded-2xl overflow-hidden shadow-2xl max-h-[95vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+
+            {/* ── STEP: CONFIRM ── */}
+            {payStep === "confirm" && (
+              <div className="p-6">
+                {/* Header */}
+                <div className="flex items-center justify-between mb-6">
+                  <h2 className="text-xl font-outfit font-bold text-[#0B2B26]">Confirm Payment</h2>
+                  <button onClick={closePayModal} className="w-9 h-9 flex items-center justify-center rounded-xl hover:bg-gray-100 transition-colors">
+                    <X size={18} className="text-gray-400" />
+                  </button>
                 </div>
-                <div className="min-w-0">
-                  <p className="font-outfit font-bold text-[#0B2B26] text-[15px] truncate">{selectedBill.title || "Invoice"}</p>
-                  <p className="text-[11px] text-gray-400">{new Date(selectedBill.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</p>
-                </div>
-              </div>
-              <div className="flex items-center gap-2 shrink-0">
-                <span className={`text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full ${selectedBill.status === "paid" ? "bg-green-50 text-green-600 border border-green-100" : "bg-red-50 text-red-500 border border-red-100"}`}>{selectedBill.status}</span>
-                <button onClick={() => setSelectedBill(null)} className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-gray-100 transition-colors">
-                  <X size={16} className="text-gray-400" />
-                </button>
-              </div>
-            </div>
 
-            {/* Body */}
-            <div className="flex-1 overflow-y-auto px-5 py-5 space-y-5">
-              
-              {/* Amount */}
-              <div className="text-center py-4">
-                <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-1">{selectedBill.status === "paid" ? "Amount Paid" : "Amount Due"}</p>
-                <p className="text-[36px] font-outfit font-bold text-[#0B2B26] leading-none tracking-tight">${selectedBill.amount.toFixed(2)}</p>
-                <p className="text-[11px] text-gray-400 font-mono mt-2">#{selectedBill.id.slice(0, 12)}</p>
-              </div>
-
-              {/* Divider */}
-              <div className="h-px bg-gray-100" />
-
-              {/* Note */}
-              {selectedBill.note && (
-                <div>
-                  <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-2">Details</p>
-                  <p className="text-[14px] text-gray-600 leading-relaxed whitespace-pre-wrap">{selectedBill.note}</p>
-                </div>
-              )}
-
-              {/* Attachment */}
-              {selectedBill.imageUrl && (
-                <div>
-                  <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-2 flex items-center gap-1">
-                    <Paperclip size={10} /> Attachment
-                  </p>
-                  <div className="flex items-center gap-3 p-3 rounded-xl border border-gray-100 bg-gray-50 hover:bg-gray-100 transition-colors">
-                    <div className="w-10 h-10 rounded-lg bg-white border border-gray-200 flex items-center justify-center shrink-0 overflow-hidden">
-                      <img src={selectedBill.imageUrl} alt="" className="w-full h-full object-cover rounded-lg" />
+                {/* Invoice Summary */}
+                <div className="bg-gray-50 rounded-2xl p-5 mb-5 border border-gray-100">
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-1">Invoice</p>
+                  <p className="text-[16px] font-bold text-[#0B2B26] mb-3">{selectedBill.title}</p>
+                  {selectedBill.imageUrl && (
+                    <div className="mb-3 rounded-xl overflow-hidden max-h-32 border border-gray-100 bg-white flex items-center justify-center">
+                      <img src={selectedBill.imageUrl} alt="Bill" className="w-full h-full object-contain" />
                     </div>
-                    <p className="text-[13px] text-[#0B2B26] font-medium truncate flex-1">{selectedBill.imageFileName || "document.png"}</p>
-                    <a href={selectedBill.imageUrl} download={selectedBill.imageFileName || "attachment.png"} className="w-8 h-8 rounded-lg flex items-center justify-center text-gray-400 hover:text-[#0B2B26] hover:bg-white transition-all shrink-0">
-                      <Download size={15} />
-                    </a>
+                  )}
+                  <div className="h-px bg-gray-200 my-3" />
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm text-gray-500 font-medium">Amount Due</p>
+                    <p className="text-[22px] font-outfit font-bold text-[#F59A25]">${selectedBill.amount.toFixed(2)}</p>
                   </div>
                 </div>
-              )}
 
-              {/* Signature */}
-              <div className="pt-4 border-t border-gray-100">
-                <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-lg bg-[#0B2B26] flex items-center justify-center shrink-0">
-                    <img src={`${import.meta.env.BASE_URL}swiftly_logo-removebg-preview.png`} alt="S" className="h-4 w-auto brightness-0 invert" />
-                  </div>
-                  <div className="w-[2px] h-6 rounded-full bg-[#F59A25]" />
-                  <div className="min-w-0">
-                    <p className="text-[12px] font-bold text-[#0B2B26] leading-tight">Swiftly Logix <span className="font-normal text-[#8EB69B]">|</span> <span className="font-normal text-gray-400 text-[11px]">Billing</span></p>
-                    <p className="text-[10px] text-gray-400 truncate">billing@swiftlylogistics.com</p>
+                {/* Payment Source */}
+                <div className="bg-[#0B2B26] rounded-2xl p-5 mb-5 text-white">
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-white/50 mb-1">Paying From</p>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-xl bg-white/10 flex items-center justify-center">
+                        <Wallet size={20} className="text-[#F59A25]" />
+                      </div>
+                      <div>
+                        <p className="font-bold text-[15px]">Dashboard Balance</p>
+                        <p className="text-[12px] text-white/60">Available funds</p>
+                      </div>
+                    </div>
+                    <p className="text-[20px] font-outfit font-bold">${balance.toFixed(2)}</p>
                   </div>
                 </div>
+
+                {/* Insufficient funds warning */}
+                {balance < selectedBill.amount && (
+                  <div className="bg-red-50 border border-red-200 rounded-xl p-4 mb-5 flex items-start gap-3">
+                    <AlertTriangle size={16} className="text-red-500 shrink-0 mt-0.5" />
+                    <div>
+                      <p className="text-sm font-bold text-red-700 mb-1">Insufficient Balance</p>
+                      <p className="text-xs text-red-600">You need ${(selectedBill.amount - balance).toFixed(2)} more. Please deposit funds first.</p>
+                    </div>
+                  </div>
+                )}
+
+                {/* Action Buttons */}
+                {balance >= selectedBill.amount ? (
+                  <button
+                    onClick={confirmPayBill}
+                    className="w-full py-4 rounded-xl font-bold text-white text-[15px] bg-[#F59A25] hover:bg-[#E08A1B] transition-all shadow-lg hover:shadow-xl flex items-center justify-center gap-2"
+                  >
+                    Confirm Payment of ${selectedBill.amount.toFixed(2)} <ChevronRight size={16} />
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => { closePayModal(); setShowDeposit(true); setStep(1); }}
+                    className="w-full py-4 rounded-xl font-bold text-white text-[15px] bg-[#0B2B26] hover:bg-[#123d36] transition-all shadow-lg flex items-center justify-center gap-2"
+                  >
+                    <Plus size={16} /> Deposit Funds
+                  </button>
+                )}
               </div>
-            </div>
+            )}
 
-            {/* Pay Footer */}
-            {selectedBill.status === "unpaid" && (
-              <div className="px-5 py-4 border-t border-gray-100 shrink-0">
+            {/* ── STEP: LOADING ── */}
+            {payStep === "loading" && (
+              <div className="p-10 text-center">
+                <div className="w-20 h-20 rounded-full bg-[#F59A25]/10 flex items-center justify-center mx-auto mb-6">
+                  <Loader2 size={36} className="text-[#F59A25] animate-spin" />
+                </div>
+                <h2 className="text-xl font-outfit font-bold text-[#0B2B26] mb-2">Processing Payment...</h2>
+                <p className="text-sm text-gray-500 mb-1">Deducting ${selectedBill.amount.toFixed(2)} from your balance</p>
+                <p className="text-xs text-gray-400">Please wait, do not close this window</p>
+              </div>
+            )}
+
+            {/* ── STEP: SUCCESS ── */}
+            {payStep === "success" && (
+              <div className="p-8 text-center">
+                <div className="w-20 h-20 rounded-full bg-green-50 border-2 border-green-100 flex items-center justify-center mx-auto mb-6">
+                  <CheckCircle2 size={36} className="text-green-500" />
+                </div>
+                <h2 className="text-xl font-outfit font-bold text-[#0B2B26] mb-2">Payment Successful!</h2>
+                <p className="text-sm text-gray-600 mb-1">Invoice <span className="font-bold">"{selectedBill.title}"</span> has been paid.</p>
+                <p className="text-sm text-green-600 font-bold mb-6">The receiver has been notified via email.</p>
+
+                <div className="bg-gray-50 border border-gray-100 rounded-xl p-4 mb-6 text-left">
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-gray-500">Amount Paid</span>
+                    <span className="font-bold text-[#0B2B26]">${selectedBill.amount.toFixed(2)}</span>
+                  </div>
+                  <div className="flex items-center justify-between text-sm mt-2">
+                    <span className="text-gray-500">New Balance</span>
+                    <span className="font-bold text-[#0B2B26]">${balance.toFixed(2)}</span>
+                  </div>
+                </div>
+
                 <button
-                  onClick={() => payBill(selectedBill)}
-                  className="w-full py-3.5 rounded-xl font-bold text-white text-[14px] transition-all hover:scale-[1.01] active:scale-[0.99] flex items-center justify-center gap-2 bg-[#0B2B26] hover:bg-[#235347] shadow-md"
+                  onClick={closePayModal}
+                  className="w-full py-4 rounded-xl font-bold text-white text-sm bg-[#0B2B26] hover:bg-[#123d36] transition-all"
                 >
-                  Pay ${selectedBill.amount.toFixed(2)} <ChevronRight size={15} />
+                  Done
                 </button>
               </div>
             )}

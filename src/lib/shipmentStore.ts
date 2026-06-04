@@ -1,65 +1,253 @@
-// Removed Supabase import
+import { supabase } from '@/lib/supabase';
 
-// Helper functions for localStorage
-const getLocalData = <T>(key: string): T[] => {
-  try {
-    const data = localStorage.getItem(key);
-    return data ? JSON.parse(data) : [];
-  } catch {
+export interface Shipment {
+  id: string;
+  userEmail?: string;
+  trackingNumber?: string;
+  tracking_code?: string;
+  createdAt: string;
+  status?: string;
+  current_status?: string;
+  origin?: string;
+  destination?: string;
+  receiver_name?: string;
+  receiver_email?: string;
+  weight?: number;
+  service?: string;
+  shipment_type?: string;
+  carrier?: string;
+  estimatedDelivery?: string;
+  expected_delivery_date?: string;
+  from?: { city: string; state: string; zip: string };
+  to?: { city: string; state: string; zip: string };
+  events?: Array<{ date: string; time: string; location: string; activity?: string; status?: string; coordinates?: { lat: number; lng: number } }>;
+  [key: string]: any;
+}
+
+export interface RegisteredUser {
+  email: string;
+  firstName?: string;
+  lastName?: string;
+  [key: string]: any;
+}
+
+export async function getShipments(client = supabase): Promise<Shipment[]> {
+  const { data, error } = await client
+    .from('shipments')
+    .select('*')
+    .order('created_at', { ascending: false });
+  
+  if (error) {
+    console.error('Error fetching shipments:', error);
     return [];
   }
-};
-
-const setLocalData = <T>(key: string, data: T[]) => {
-  localStorage.setItem(key, JSON.stringify(data));
-};
-
-export async function getShipments(): Promise<Shipment[]> {
-  const shipments = getLocalData<Shipment>('swiftly_shipments');
-  return shipments.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  
+  return (data || []).map(mapDbToShipment);
 }
 
-export async function saveShipment(shipment: Shipment): Promise<void> {
-  const shipments = getLocalData<Shipment>('swiftly_shipments');
-  const index = shipments.findIndex(s => s.id === shipment.id);
-  if (index >= 0) {
-    shipments[index] = shipment;
-  } else {
-    shipments.push(shipment);
+export async function getShipmentById(id: string, client = supabase): Promise<Shipment | null> {
+  const { data, error } = await client
+    .from('shipments')
+    .select('*')
+    .eq('id', id)
+    .single();
+
+  if (error || !data) {
+    return null;
   }
-  setLocalData('swiftly_shipments', shipments);
+
+  return mapDbToShipment(data);
 }
 
-export async function deleteShipment(id: string): Promise<void> {
-  let shipments = getLocalData<Shipment>('swiftly_shipments');
-  shipments = shipments.filter(s => s.id !== id);
-  setLocalData('swiftly_shipments', shipments);
-}
+export async function saveShipment(shipment: Shipment, client = supabase): Promise<void> {
+  const { error } = await client
+    .from('shipments')
+    .upsert(mapShipmentToDb(shipment));
 
-export async function getShipmentsForUser(email: string): Promise<Shipment[]> {
-  const shipments = getLocalData<Shipment>('swiftly_shipments');
-  return shipments
-    .filter(s => s.userEmail?.toLowerCase() === email.toLowerCase() || s.receiver_email?.toLowerCase() === email.toLowerCase())
-    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-}
-
-export async function getRegisteredUsers(): Promise<RegisteredUser[]> {
-  const users = getLocalData<RegisteredUser>('swiftly_users');
-  return users; // Order not strictly needed for local storage as they are ordered by insertion
-}
-
-export async function updateRegisteredUser(user: RegisteredUser): Promise<void> {
-  const users = getLocalData<RegisteredUser>('swiftly_users');
-  const index = users.findIndex(u => u.email === user.email);
-  if (index >= 0) {
-    users[index] = { ...users[index], ...user };
-    setLocalData('swiftly_users', users);
+  if (error) {
+    console.error('Error saving shipment:', error);
   }
 }
 
-export async function getFullUserAccount(email: string): Promise<RegisteredUser | null> {
-  const users = getLocalData<RegisteredUser>('swiftly_users');
-  return users.find(u => u.email === email) || null;
+export async function deleteShipment(id: string, client = supabase): Promise<void> {
+  const { error } = await client
+    .from('shipments')
+    .delete()
+    .eq('id', id);
+
+  if (error) {
+    console.error('Error deleting shipment:', error);
+  }
+}
+
+export async function getShipmentsForUser(email: string, client = supabase): Promise<Shipment[]> {
+  const { data, error } = await client
+    .from('shipments')
+    .select('*')
+    .or(`user_email.eq.${email},receiver_email.eq.${email}`)
+    .order('created_at', { ascending: false });
+
+  if (error) {
+    console.error('Error fetching shipments for user:', error);
+    return [];
+  }
+
+  return (data || []).map(mapDbToShipment);
+}
+
+export async function getRegisteredUsers(client = supabase): Promise<RegisteredUser[]> {
+  const { data, error } = await client
+    .from('users')
+    .select('*');
+
+  if (error) {
+    console.error('Error fetching users:', error);
+    return [];
+  }
+
+  return (data || []).map(mapDbToUser);
+}
+
+export async function updateRegisteredUser(user: RegisteredUser, client = supabase): Promise<void> {
+  const dbUser: any = { ...user };
+  
+  if (user.firstName !== undefined) dbUser.first_name = user.firstName;
+  if (user.lastName !== undefined) dbUser.last_name = user.lastName;
+  if (user.accountType !== undefined) dbUser.account_type = user.accountType;
+  if (user.userId !== undefined) dbUser.user_id = user.userId;
+  if (user.postalCode !== undefined) dbUser.postal_code = user.postalCode;
+  if (user.profilePicture !== undefined) dbUser.profile_picture = user.profilePicture;
+  if (user.walletBalance !== undefined) dbUser.wallet_balance = user.walletBalance;
+
+  // Remove camelCase fields to avoid Supabase errors
+  delete dbUser.firstName;
+  delete dbUser.lastName;
+  delete dbUser.accountType;
+  delete dbUser.userId;
+  delete dbUser.postalCode;
+  delete dbUser.profilePicture;
+  delete dbUser.walletBalance;
+
+  const { error } = await client
+    .from('users')
+    .update(dbUser)
+    .eq('email', user.email);
+
+  if (error) {
+    console.error('Error updating user:', error);
+  }
+}
+
+export async function getFullUserAccount(email: string, client = supabase): Promise<RegisteredUser | null> {
+  const { data, error } = await client
+    .from('users')
+    .select('*')
+    .eq('email', email)
+    .single();
+
+  if (error || !data) {
+    return null;
+  }
+
+  return mapDbToUser(data);
+}
+
+function mapDbToUser(db: any): RegisteredUser {
+  return {
+    email: db.email,
+    firstName: db.first_name,
+    lastName: db.last_name,
+    accountType: db.account_type,
+    userId: db.user_id,
+    company: db.company,
+    address: db.address,
+    postalCode: db.postal_code,
+    profilePicture: db.profile_picture,
+    status: db.status,
+    role: db.role,
+    walletBalance: db.wallet_balance,
+    ...db,
+  };
+}
+
+function mapDbToShipment(db: any): Shipment {
+  const metadata = db.from_address || {};
+  return {
+    id: db.id,
+    userEmail: db.user_email,
+    trackingNumber: db.tracking_number,
+    tracking_code: db.tracking_number,
+    createdAt: db.created_at,
+    status: db.status,
+    current_status: db.status,
+    origin: db.origin,
+    destination: db.destination,
+    receiver_name: db.receiver_name,
+    receiver_email: db.receiver_email,
+    weight: db.weight,
+    service: db.service_type,
+    shipment_type: db.service_type,
+    estimatedDelivery: db.expected_delivery_date,
+    expected_delivery_date: db.expected_delivery_date,
+    from: metadata,
+    to: db.to_address,
+    events: (db.events || []).map((e: any) => ({
+      ...e,
+      // DB events may use 'activity' instead of 'status' — expose both
+      status: e.status || e.activity || '',
+      activity: e.activity || e.status || '',
+    })),
+    
+    // Unpack metadata
+    sender_phone: metadata.sender_phone,
+    sender_address: metadata.sender_address,
+    receiver_phone: metadata.receiver_phone,
+    receiver_address: metadata.receiver_address,
+    contents: metadata.contents,
+    departure_date: metadata.departure_date,
+    departure_time: metadata.departure_time,
+    current_location: metadata.current_location,
+    notice: metadata.notice,
+    carrier: metadata.carrier,
+    transit_waypoints: metadata.transit_waypoints,
+    changeRequest: metadata.changeRequest
+  };
+}
+
+function mapShipmentToDb(s: Shipment): any {
+  // Pack fields missing from SQL schema into the from_address JSONB column
+  const extraMetadata = {
+    ...s.from,
+    sender_phone: s.sender_phone,
+    sender_address: s.sender_address,
+    receiver_phone: s.receiver_phone,
+    receiver_address: s.receiver_address,
+    contents: s.contents,
+    departure_date: s.departure_date,
+    departure_time: s.departure_time,
+    current_location: s.current_location,
+    notice: s.notice,
+    carrier: s.carrier,
+    transit_waypoints: s.transit_waypoints,
+    changeRequest: s.changeRequest
+  };
+
+  return {
+    id: s.id,
+    user_email: s.userEmail || '',
+    tracking_number: s.trackingNumber || s.tracking_code || '',
+    status: s.status || s.current_status || 'PENDING',
+    origin: s.origin || '',
+    destination: s.destination || '',
+    receiver_name: s.receiver_name || '',
+    receiver_email: s.receiver_email || '',
+    weight: s.weight || 0,
+    service_type: s.service || s.shipment_type || s.carrier || '',
+    expected_delivery_date: s.estimatedDelivery || s.expected_delivery_date || '',
+    from_address: extraMetadata,
+    to_address: s.to || null,
+    events: s.events || [],
+  };
 }
 
 export function generateTrackingNumber(): string {

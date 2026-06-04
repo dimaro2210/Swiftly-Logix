@@ -1,4 +1,4 @@
-import { useState } from "react";
+import React, { useState } from "react";
 import { useLocation, Link } from "wouter";
 import { useAuth } from "@/context/AuthContext";
 import { Eye, EyeOff } from "lucide-react";
@@ -11,8 +11,14 @@ export default function Login() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
-  const { login } = useAuth();
+  const { login, isAuthenticated } = useAuth();
   const [, navigate] = useLocation();
+
+  React.useEffect(() => {
+    if (isAuthenticated) {
+      navigate("/dashboard");
+    }
+  }, [isAuthenticated, navigate]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -25,11 +31,22 @@ export default function Login() {
     }
 
     setLoading(true);
-    await new Promise((r) => setTimeout(r, 600));
-    const result = await login(sEmail, password);
-    setLoading(false);
-    if (result.success) { window.location.href = "/dashboard"; }
-    else { setError(result.error || "Invalid credentials. Please try again."); }
+    try {
+      const result = await Promise.race([
+        login(sEmail, password),
+        new Promise<{ success: boolean, error?: string }>((_, reject) => setTimeout(() => reject(new Error("Login request timed out. Please try again.")), 15000))
+      ]);
+      setLoading(false);
+      
+      if (result.success) {
+        navigate("/dashboard");
+      } else { 
+        setError(result.error || "Invalid credentials. Please try again."); 
+      }
+    } catch (err: any) {
+      setLoading(false);
+      setError(err.message || "An unexpected error occurred during login.");
+    }
   };
 
   const iconFilter = "brightness(0) saturate(100%) invert(14%) sepia(30%) saturate(700%) hue-rotate(120deg)";

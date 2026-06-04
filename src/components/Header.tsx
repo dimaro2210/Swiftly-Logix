@@ -203,7 +203,7 @@ export default function Header() {
                         )}
                      </button>
                   </Link>
-                  <button onClick={logout}
+                  <button onClick={async () => { await logout(); setLocation("/"); }}
                     className="hidden md:flex items-center gap-2 px-6 py-3 rounded-full font-bold text-[14px] transition-all relative overflow-hidden group"
                     style={{
                       background: 'rgba(11,43,38,0.85)',
@@ -334,8 +334,8 @@ export default function Header() {
               </div>
 
               <div className="pt-8 border-t border-[#8EB69B]/30 mt-auto">
-                 {isAuthenticated ? (
-                   <button onClick={logout}
+                  {isAuthenticated ? (
+                   <button onClick={async () => { await logout(); setLocation("/"); setMobileOpen(false); }}
                      className="w-full py-5 rounded-full font-bold text-[16px] relative overflow-hidden"
                      style={{
                        background: 'rgba(11,43,38,0.85)',

@@ -3,7 +3,7 @@ import { useAuth } from "@/context/AuthContext";
 import { useLocation } from "wouter";
 
 export default function FileClaim() {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, loading } = useAuth();
   const [, navigate] = useLocation();
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [claimType, setClaimType] = useState("");
@@ -14,8 +14,8 @@ export default function FileClaim() {
   const [submitted, setSubmitted] = useState(false);
 
   useEffect(() => {
-    if (!isAuthenticated) navigate("/auth/login");
-  }, [isAuthenticated]);
+    if (!loading && !isAuthenticated) navigate("/auth/login");
+  }, [isAuthenticated, loading]);
 
   if (submitted) {
     return (
