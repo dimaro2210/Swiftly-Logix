@@ -98,20 +98,20 @@ export default function Home() {
           <div className="w-full max-w-3xl">
             <div className="relative rounded-[16px] md:rounded-[24px] p-5 md:p-10 overflow-hidden">
               {/* Glass Layer 1: Distortion + Blur */}
-              <div className="absolute inset-0 z-0 rounded-[16px] md:rounded-[24px]" style={{ backdropFilter: 'blur(40px) saturate(200%)', WebkitBackdropFilter: 'blur(40px) saturate(200%)', filter: 'url(#glass-distortion)', isolation: 'isolate' }} />
+              <div className="absolute inset-0 z-0 rounded-[16px] md:rounded-[24px]" style={{ backdropFilter: 'blur(25px) saturate(180%)', WebkitBackdropFilter: 'blur(25px) saturate(180%)', isolation: 'isolate' }} />
               {/* Glass Layer 2: White overlay */}
-              <div className="absolute inset-0 z-[1] rounded-[16px] md:rounded-[24px]" style={{ background: 'rgba(255,255,255,0.75)' }} />
+              <div className="absolute inset-0 z-[1] rounded-[16px] md:rounded-[24px]" style={{ background: 'rgba(255,255,255,0.2)' }} />
               {/* Glass Layer 3: Frosted tint */}
-              <div className="absolute inset-0 z-[2] rounded-[16px] md:rounded-[24px]" style={{ background: 'rgba(255,255,255,0.15)' }} />
+              <div className="absolute inset-0 z-[2] rounded-[16px] md:rounded-[24px]" style={{ background: 'linear-gradient(135deg, rgba(255,255,255,0.4) 0%, rgba(255,255,255,0.1) 100%)' }} />
               {/* Glass Layer 4: Inner glow + shadow */}
-              <div className="absolute inset-0 z-[3] rounded-[16px] md:rounded-[24px] overflow-hidden" style={{ boxShadow: 'inset 2px 2px 1px 0 rgba(255,255,255,0.6), inset -1px -1px 1px 1px rgba(255,255,255,0.4), 0px 10px 40px rgba(11,43,38,0.15)' }} />
+              <div className="absolute inset-0 z-[3] rounded-[16px] md:rounded-[24px] overflow-hidden" style={{ boxShadow: 'inset 2px 2px 1px 0 rgba(255,255,255,0.8), inset -1px -1px 1px 1px rgba(255,255,255,0.3), 0px 15px 50px rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.4)' }} />
               <div className="relative z-[10]">
               {/* Tracking heading with icon */}
               <div className="flex items-center gap-4 mb-6">
-                <div className="w-14 h-14 bg-[#DAF1DE] rounded-full flex items-center justify-center">
-                  <Package size={28} className="text-[#235347]" />
+                <div className="w-14 h-14 bg-white/60 backdrop-blur-md rounded-full flex items-center justify-center border border-white/50 shadow-inner">
+                  <Package size={28} className="text-[#F59A25] drop-shadow-sm" strokeWidth={2.5} />
                 </div>
-                <h2 className="text-[20px] sm:text-[24px] md:text-[36px] font-medium text-[#0B2B26]">Tracking</h2>
+                <h2 className="text-[20px] sm:text-[24px] md:text-[36px] font-bold text-white drop-shadow-md">Track Your Shipment</h2>
               </div>
 
               {/* Input + Button */}
@@ -141,29 +141,29 @@ export default function Home() {
               </div>
 
               {/* Need help link */}
-              <p className="hidden md:block text-[13px] md:text-[15px] text-[#0B2B26] mb-6 md:mb-8">
+              <p className="hidden md:block text-[13px] md:text-[15px] text-white/90 mb-6 md:mb-8 drop-shadow-md">
                 Need help changing your delivery?{" "}
                 <Link href="/track/change-delivery">
-                  <span className="underline cursor-pointer text-[#235347] hover:text-[#F59A25]">Get Help</span>
+                  <span className="underline cursor-pointer text-[#F59A25] hover:text-white transition-colors">Get Help</span>
                 </Link>
               </p>
 
               {/* Bottom 3 quick links */}
               <div className="hidden md:flex flex-col sm:flex-row flex-wrap gap-x-6 md:gap-x-8 gap-y-3 md:gap-y-4">
                 <Link href="/track/swiftly-my-choice">
-                  <span className="flex items-center gap-2 text-[15px] font-medium cursor-pointer hover:underline text-[#235347]">
+                  <span className="flex items-center gap-2 text-[15px] font-medium cursor-pointer hover:underline text-white drop-shadow-md hover:text-[#F59A25] transition-colors">
                     <Bell size={18} className="fill-current" />
                     Set Up Alerts
                   </span>
                 </Link>
                 <Link href="/track/change-delivery">
-                  <span className="flex items-center gap-2 text-[15px] font-medium cursor-pointer hover:underline text-[#235347]">
+                  <span className="flex items-center gap-2 text-[15px] font-medium cursor-pointer hover:underline text-white drop-shadow-md hover:text-[#F59A25] transition-colors">
                     <Truck size={18} className="fill-current" />
                     Change Delivery
                   </span>
                 </Link>
                 <Link href="/#contact">
-                  <span className="flex items-center gap-2 text-[15px] font-medium cursor-pointer hover:underline text-[#235347]">
+                  <span className="flex items-center gap-2 text-[15px] font-medium cursor-pointer hover:underline text-white drop-shadow-md hover:text-[#F59A25] transition-colors">
                     <HelpCircle size={18} className="fill-current" />
                     Get Support
                   </span>
@@ -542,7 +542,7 @@ export default function Home() {
                 </div>
                 <div>
                   <p className="text-[13px] font-bold uppercase tracking-widest text-[#8EB69B] mb-1">Phone Number</p>
-                  <p className="text-[18px] font-medium text-[#0B2B26] hover:text-[#F59A25] cursor-pointer transition-colors">1-800-SWIFTLY (794-3859)</p>
+                  <a href="tel:+12135665575" className="text-[18px] font-medium text-[#0B2B26] hover:text-[#F59A25] cursor-pointer transition-colors block">+1 (213) 566-5575</a>
                   <p className="text-[14px] text-[#235347] mt-1">Mon–Fri 8AM–8PM ET</p>
                 </div>
               </div>

@@ -65,45 +65,33 @@ export default function Header() {
         }}
       >
         {/* ── Liquid Glass Layers ── */}
-        {/* Layer 1: SVG Distortion + Blur */}
+        {/* Layer 1: Blur */}
         <div
           className="absolute inset-0 z-0 overflow-hidden"
           style={{
-            backdropFilter: 'blur(40px) saturate(220%)',
-            WebkitBackdropFilter: 'blur(40px) saturate(220%)',
-            filter: 'url(#glass-distortion)',
+            backdropFilter: 'blur(25px) saturate(180%)',
+            WebkitBackdropFilter: 'blur(25px) saturate(180%)',
             isolation: 'isolate',
           }}
         />
-        {/* Layer 2: Semi-transparent tinted overlay */}
+        {/* Layer 2: Base Overlay */}
         <div
           className="absolute inset-0 z-[1] transition-all duration-500"
-          style={{
-            background: scrolled
-              ? 'linear-gradient(180deg, rgba(255,247,225,0.45) 0%, rgba(218,241,222,0.35) 100%)'
-              : 'linear-gradient(180deg, rgba(255,247,225,0.30) 0%, rgba(218,241,222,0.20) 100%)',
-          }}
+          style={{ background: scrolled ? 'rgba(255,255,255,0.6)' : 'rgba(255,255,255,0.2)' }}
         />
-        {/* Layer 3: White frosted tint */}
+        {/* Layer 3: Frosted Tint */}
         <div
           className="absolute inset-0 z-[2]"
-          style={{ background: 'rgba(255, 255, 255, 0.15)' }}
+          style={{ background: 'linear-gradient(135deg, rgba(255,255,255,0.4) 0%, rgba(255,255,255,0.1) 100%)' }}
         />
-        {/* Layer 4: Inner glow / specular edge highlights */}
+        {/* Layer 4: Inner glow / shadow */}
         <div
           className="absolute inset-0 z-[3] overflow-hidden transition-all duration-500"
           style={{
             boxShadow: scrolled
-              ? 'inset 0 1px 1px 0 rgba(255,255,255,0.6), inset 0 -1px 1px 0 rgba(255,255,255,0.3), 0 8px 32px rgba(11,43,38,0.12)'
-              : 'inset 0 1px 1px 0 rgba(255,255,255,0.4), inset 0 -1px 1px 0 rgba(255,255,255,0.2)',
-          }}
-        />
-        {/* Layer 5: Bottom edge highlight line for glass rim */}
-        <div
-          className="absolute bottom-0 left-0 right-0 h-px z-[4] transition-opacity duration-500"
-          style={{
-            background: 'linear-gradient(90deg, transparent, rgba(255,255,255,0.5), transparent)',
-            opacity: scrolled ? 1 : 0.5,
+              ? 'inset 0 1px 1px 0 rgba(255,255,255,0.8), inset 0 -1px 1px 0 rgba(255,255,255,0.3), 0 8px 32px rgba(0,0,0,0.05)'
+              : 'inset 0 1px 1px 0 rgba(255,255,255,0.8), inset 0 -1px 1px 0 rgba(255,255,255,0.3)',
+            borderBottom: scrolled ? '1px solid rgba(255,255,255,0.6)' : '1px solid rgba(255,255,255,0.2)'
           }}
         />
 

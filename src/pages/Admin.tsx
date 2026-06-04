@@ -450,7 +450,7 @@ export default function Admin() {
         <div className="h-16 md:h-20 flex items-center justify-between px-4 md:px-6 border-b border-white/10 shrink-0">
           <div className="flex items-center gap-2 md:gap-3 min-w-0">
             <img src={`${import.meta.env.BASE_URL}swiftly_logo-removebg-preview.png`} alt="Swiftly Logix" className="h-10 md:h-12 shrink-0" />
-            <span className="text-white font-bold text-[13px] md:text-[14px] tracking-wide truncate">Swiftly Logix Admin</span>
+            
           </div>
           <button onClick={() => setSidebarOpen(false)} className="lg:hidden text-white/50 hover:text-white transition-colors shrink-0 ml-2">
             <X size={22} />
@@ -542,7 +542,7 @@ export default function Admin() {
               <div className="flex items-center cursor-pointer group gap-2 md:gap-3">
                 <img src={`${import.meta.env.BASE_URL}swiftly_logo-removebg-preview.png`} alt="Swiftly Logix" className="h-12 md:h-20 transition-all duration-300 group-hover:scale-105" />
                 <span className="font-bold tracking-widest text-[12px] md:text-[18px] text-[#0B2B26]">
-                  Swiftly Logix Admin
+                  
                 </span>
               </div>
             </Link>
@@ -551,7 +551,7 @@ export default function Admin() {
               {/* Desktop: show a subtle status pill */}
               <div className="hidden md:flex items-center gap-2 px-4 py-2 rounded-full border" style={{ background: 'rgba(11,43,38,0.05)', borderColor: 'rgba(11,43,38,0.10)' }}>
                 <div className="w-2 h-2 rounded-full bg-[#F59A25] animate-pulse" />
-                <span className="text-[#0B2B26]/80 text-[13px] font-medium">Control Panel Active</span>
+                <span className="text-[#0B2B26]/80 text-[13px] font-medium"></span>
               </div>
               {/* Mobile hamburger — right side */}
               <button
