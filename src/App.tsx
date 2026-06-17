@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { Switch, Route, Router as WouterRouter } from "wouter";
+import { Switch, Route, Router as WouterRouter, useLocation } from "wouter";
 import AOS from "aos";
 import "aos/dist/aos.css";
 import { AuthProvider } from "@/context/AuthContext";
@@ -121,6 +121,40 @@ function Router() {
   );
 }
 
+function TawkToManager() {
+  const [location] = useLocation();
+
+  useEffect(() => {
+    let checkCount = 0;
+    const toggleTawk = () => {
+      const w = window as any;
+      if (w.Tawk_API && typeof w.Tawk_API.hideWidget === 'function') {
+        const isAppRoute = location.startsWith('/admin') || location.startsWith('/dashboard') || location.startsWith('/shared');
+        if (isAppRoute) {
+          w.Tawk_API.hideWidget();
+        } else {
+          w.Tawk_API.showWidget();
+          w.Tawk_API.minimize();
+        }
+        return true;
+      }
+      return false;
+    };
+
+    if (!toggleTawk()) {
+      const interval = setInterval(() => {
+        checkCount++;
+        if (toggleTawk() || checkCount > 20) {
+          clearInterval(interval);
+        }
+      }, 500);
+      return () => clearInterval(interval);
+    }
+  }, [location]);
+
+  return null;
+}
+
 export default function App() {
   useEffect(() => {
     AOS.init({
@@ -135,6 +169,7 @@ export default function App() {
     <AuthProvider>
       <GlassFilter />
       <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
+        <TawkToManager />
         <ScrollToTop />
         <Router />
         <BackToTopButton />

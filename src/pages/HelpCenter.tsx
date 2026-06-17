@@ -1,6 +1,15 @@
-import { Link } from "wouter";
+import { Link, useLocation } from "wouter";
+import { useState } from "react";
 
 export default function HelpCenter() {
+  const [, navigate] = useLocation();
+  const [searchQuery, setSearchQuery] = useState("");
+
+  const handleSearch = () => {
+    if (searchQuery.trim()) {
+      navigate(`/tracking?tn=${encodeURIComponent(searchQuery.trim())}`);
+    }
+  };
   return (
     <div className="min-h-screen" style={{ backgroundColor: "#FFF7E1" }}>
       {/* Hero */}
@@ -18,9 +27,13 @@ export default function HelpCenter() {
                 <img src="https://www.ups.com/webassets/icons/search.svg" alt="Search" className="w-6 h-6 opacity-40" style={{ filter: "brightness(0) saturate(100%) invert(14%) sepia(30%) saturate(700%) hue-rotate(120deg)" }} />
               </div>
               <input type="text" placeholder="Search for tracking, shipping, claims, and more..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && handleSearch()}
                 className="w-full py-4 text-[18px] outline-none text-[#0B2B26] font-medium placeholder-[#8EB69B] bg-transparent" />
               <button className="px-10 py-4 rounded-full font-bold text-[16px] transition-all shadow-md text-white"
                 style={{ backgroundColor: "#F59A25" }}
+                onClick={handleSearch}
                 onMouseOver={e => (e.currentTarget.style.backgroundColor = "#C89B3C")}
                 onMouseOut={e => (e.currentTarget.style.backgroundColor = "#F59A25")}>Search</button>
             </div>

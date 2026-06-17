@@ -102,9 +102,11 @@ export default function TheSwiftlyStore() {
                 <div className="flex gap-4 mt-8">
                   <button className="flex-1 py-3 rounded-full text-[14px] font-bold transition-all shadow-md text-white"
                     style={{ backgroundColor: "#F59A25" }}
+                    onClick={() => window.open(`https://maps.google.com/?q=${encodeURIComponent(store.address)}`, '_blank')}
                     onMouseOver={e => (e.currentTarget.style.backgroundColor = "#C89B3C")}
                     onMouseOut={e => (e.currentTarget.style.backgroundColor = "#F59A25")}>Directions</button>
                   <button className="flex-1 py-3 rounded-full text-[14px] font-bold border-2 transition-all hover:bg-[#DAF1DE]"
+                    onClick={() => alert(`Store details for ${store.name} coming soon!`)}
                     style={{ borderColor: "#235347", color: "#235347" }}>Store Details</button>
                 </div>
               </div>

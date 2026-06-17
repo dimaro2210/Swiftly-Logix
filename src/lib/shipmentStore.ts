@@ -18,8 +18,8 @@ export interface Shipment {
   carrier?: string;
   estimatedDelivery?: string;
   expected_delivery_date?: string;
-  from?: { city: string; state: string; zip: string };
-  to?: { city: string; state: string; zip: string };
+  from?: { name?: string; address?: string; city: string; state: string; zip: string; country?: string };
+  to?: { name?: string; address?: string; city: string; state: string; zip: string; country?: string };
   events?: Array<{ date: string; time: string; location: string; activity?: string; status?: string; coordinates?: { lat: number; lng: number } }>;
   [key: string]: any;
 }

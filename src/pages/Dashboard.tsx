@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import { Bell, Plus, X, Package, Clock, MapPin, ShieldCheck, CreditCard, HelpCircle, Camera, User, ChevronRight, Settings, CheckCircle2, TrendingUp, Search, DollarSign, FileText, AlertCircle, Share2, Copy, Link2, Trash2, Loader2, ArrowLeft, Wallet, AlertTriangle, Bitcoin, Upload, Check } from "lucide-react";
 import { getShipments, deleteShipment, getShipmentsForUser } from "@/lib/shipmentStore";
 import type { Shipment } from "@/lib/shipmentStore";
-import { getNotifications, markAllNotificationsRead, getUnreadCount, getBills, saveBill, getUserBalance, setUserBalance, getDeposits, saveDeposit, generateId, getWalletAddresses } from "@/lib/billingStore";
+import { getNotifications, markAllNotificationsRead, getUnreadCount, getBills, saveBill, saveNotification, getUserBalance, setUserBalance, getDeposits, saveDeposit, generateId, getWalletAddresses } from "@/lib/billingStore";
 import type { Notification, Bill, Deposit } from "@/lib/billingStore";
 import { sendBillPaidEmail } from "@/lib/emailService";
 import { motion, AnimatePresence } from "framer-motion";
@@ -20,7 +20,7 @@ const statusColors: Record<string, { bg: string; text: string; border: string; i
 };
 
 function StatusBadge({ status }: { status: Shipment["status"] }) {
-  const config = statusColors[status] || statusColors["Delivered"];
+  const config = statusColors[status || "Delivered"] || statusColors["Delivered"];
   const isActive = status !== "Delivered" && status !== "Exception";
   
   return (
@@ -36,7 +36,7 @@ function StatusBadge({ status }: { status: Shipment["status"] }) {
 
 function ShipmentTimeline({ status }: { status: Shipment["status"] }) {
   const steps = ["Label Created", "In Transit", "Out for Delivery", "Delivered"];
-  const currentIndex = steps.indexOf(status) === -1 && status === "Exception" ? 1 : steps.indexOf(status);
+  const currentIndex = steps.indexOf(status || "") === -1 && status === "Exception" ? 1 : steps.indexOf(status || "");
   
   return (
     <div className="relative pt-6 pb-2">
@@ -224,7 +224,7 @@ export default function Dashboard({ sharedShipment, sharedRecipientName, sharedS
 
   if (!isSharedMode && (!isAuthenticated || !user)) return null;
   if (!displayUser) return null;
-  const activeCount = shipments.filter((s) => !["Delivered", "Exception"].includes(s.status)).length;
+  const activeCount = shipments.filter((s) => !["Delivered", "Exception"].includes(s.status || "")).length;
   const showToast = (msg: string) => { setToastMsg(msg); setTimeout(() => setToastMsg(""), 3000); };
 
   const fadeUp = { hidden: { opacity: 0, y: 20 }, visible: { opacity: 1, y: 0, transition: { duration: 0.6, ease: [0.22, 1, 0.36, 1] } } };
@@ -316,6 +316,9 @@ export default function Dashboard({ sharedShipment, sharedRecipientName, sharedS
           </div>
 
           <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} transition={{ delay: 0.4 }} className="flex w-full md:w-auto items-center justify-center gap-3">
+            <button onClick={() => { const w = window as any; if (w.Tawk_API) { w.Tawk_API.showWidget(); w.Tawk_API.maximize(); } }} className="w-12 h-12 md:w-14 md:h-14 rounded-full bg-white/5 backdrop-blur-xl border border-white/10 flex items-center justify-center text-white hover:bg-white/10 hover:border-swiftly-orange transition-all relative group shadow-xl shrink-0" aria-label="Live Support" title="Live Support">
+              <HelpCircle size={20} className="group-hover:scale-110 transition-transform" />
+            </button>
             {!isSharedMode && (
               <button onClick={() => setShowNotif(!showNotif)} className="w-12 h-12 md:w-14 md:h-14 rounded-full bg-white/5 backdrop-blur-xl border border-white/10 flex items-center justify-center text-white hover:bg-white/10 hover:border-swiftly-orange transition-all relative group shadow-xl shrink-0">
                 <Bell size={20} className="group-hover:rotate-12 transition-transform" />
@@ -409,7 +412,7 @@ export default function Dashboard({ sharedShipment, sharedRecipientName, sharedS
                     ) : (
                       <div className="grid grid-cols-1 gap-5">
                         <AnimatePresence mode="popLayout">
-                          {shipments.filter(s => activeTab === "all" || (activeTab === "active" && !["Delivered", "Exception"].includes(s.status)) || (activeTab === "delivered" && s.status === "Delivered")).map((s) => (
+                          {shipments.filter(s => activeTab === "all" || (activeTab === "active" && !["Delivered", "Exception"].includes(s.status || "")) || (activeTab === "delivered" && s.status === "Delivered")).map((s) => (
                             <motion.div 
                               key={s.id} 
                               layout 
@@ -549,7 +552,7 @@ export default function Dashboard({ sharedShipment, sharedRecipientName, sharedS
                   {[
                     { label: "Overview", icon: Package, action: () => setCurrentView("main"), active: currentView === "main", color: "text-[#0B2B26]", bg: "bg-gray-50" },
                     { label: "Billing", icon: CreditCard, link: "/billing", color: "text-blue-500", bg: "bg-blue-50" },
-                    { label: "Help Center", icon: HelpCircle, link: "/support/help-center", color: "text-[#F59A25]", bg: "bg-orange-50" },
+                    { label: "Live Support", icon: HelpCircle, action: () => { const w = window as any; if (w.Tawk_API) { w.Tawk_API.showWidget(); w.Tawk_API.maximize(); } }, color: "text-[#F59A25]", bg: "bg-orange-50" },
                     { label: "Find Us", icon: MapPin, link: "/support/help-center", color: "text-purple-500", bg: "bg-purple-50" },
                   ].map((a, i) => (
                     <div key={i} onClick={a.action ? a.action : undefined} className="h-full">
